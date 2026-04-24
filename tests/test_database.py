@@ -276,3 +276,300 @@ class TestFileFormat:
     def test_parse_file_invalid_raises(self):
         with pytest.raises((ValueError, KeyError)):
             _parse_file("no frontmatter here")
+
+
+class TestVersionTracking:
+    def test_create_snippet_creates_version_1(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+        versions = tmp_db.get_versions(created.id)
+        assert len(versions) == 1
+        assert versions[0].version == 1
+        assert versions[0].title == sample_snippet.title
+        assert versions[0].content == sample_snippet.content
+        assert versions[0].snippet_id == created.id
+
+    def test_update_creates_new_version(self, tmp_db, sample_snippet):
+        import time
+
+        created = tmp_db.create(sample_snippet)
+        time.sleep(0.001)
+
+        created.content = "updated content"
+        tmp_db.update(created)
+
+        versions = tmp_db.get_versions(created.id)
+        assert len(versions) == 2
+        assert versions[0].version == 2
+        assert versions[1].version == 1
+        assert versions[0].content == "updated content"
+        assert versions[1].content == sample_snippet.content
+
+    def test_update_without_create_version_flag(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+        versions_before = tmp_db.count_versions(created.id)
+
+        created.content = "updated without version"
+        tmp_db.update(created, create_version=False)
+
+        versions_after = tmp_db.count_versions(created.id)
+        assert versions_after == versions_before
+
+    def test_get_version_retrieves_specific_version(self, tmp_db):
+        snippet = Snippet(title="V1", content="content v1")
+        created = tmp_db.create(snippet)
+
+        created.title = "V2"
+        created.content = "content v2"
+        tmp_db.update(created)
+
+        v1 = tmp_db.get_version(created.id, 1)
+        v2 = tmp_db.get_version(created.id, 2)
+
+        assert v1 is not None
+        assert v1.version == 1
+        assert v1.title == "V1"
+        assert v1.content == "content v1"
+
+        assert v2 is not None
+        assert v2.version == 2
+        assert v2.title == "V2"
+        assert v2.content == "content v2"
+
+    def test_get_version_returns_none_for_nonexistent(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+        assert tmp_db.get_version(created.id, 999) is None
+        assert tmp_db.get_version("nonexistent", 1) is None
+
+    def test_restore_version(self, tmp_db):
+        snippet = Snippet(title="Original", content="original content", tags=["orig"])
+        created = tmp_db.create(snippet)
+
+        created.title = "Modified"
+        created.content = "modified content"
+        created.tags = ["modified"]
+        tmp_db.update(created)
+
+        current = tmp_db.get_by_id(created.id)
+        assert current.title == "Modified"
+        assert current.content == "modified content"
+        assert current.tags == ["modified"]
+
+        restored = tmp_db.restore_version(created.id, 1)
+        assert restored is not None
+        assert restored.title == "Original"
+        assert restored.content == "original content"
+        assert restored.tags == ["orig"]
+
+        versions = tmp_db.get_versions(created.id)
+        assert len(versions) == 3
+        assert versions[0].version == 3
+
+    def test_restore_version_nonexistent_returns_none(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+        assert tmp_db.restore_version("nonexistent", 1) is None
+        assert tmp_db.restore_version(created.id, 999) is None
+
+    def test_delete_removes_all_versions(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+
+        created.content = "update 1"
+        tmp_db.update(created)
+
+        created.content = "update 2"
+        tmp_db.update(created)
+
+        versions_before = tmp_db.count_versions(created.id)
+        assert versions_before == 3
+
+        tmp_db.delete(created.id)
+        versions_after = tmp_db.count_versions(created.id)
+        assert versions_after == 0
+
+    def test_count_versions_empty_snippet(self, tmp_db):
+        assert tmp_db.count_versions("nonexistent") == 0
+
+    def test_get_versions_empty_snippet(self, tmp_db):
+        assert tmp_db.get_versions("nonexistent") == []
+
+    def test_versions_ordered_descending(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+
+        for i in range(5):
+            created.content = f"update {i + 1}"
+            tmp_db.update(created)
+
+        versions = tmp_db.get_versions(created.id)
+        assert len(versions) == 6
+
+        version_numbers = [v.version for v in versions]
+        assert version_numbers == [6, 5, 4, 3, 2, 1]
+
+    def test_version_preserves_all_fields(self, tmp_db):
+        snippet = Snippet(
+            title="Test Title",
+            content="line1\nline2\nline3",
+            language="python",
+            description="Test description",
+            tags=["tag1", "tag2", "tag3"],
+        )
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.title == "Test Title"
+        assert version.content == "line1\nline2\nline3"
+        assert version.language == "python"
+        assert version.description == "Test description"
+        assert version.tags == ["tag1", "tag2", "tag3"]
+        assert version.snippet_id == created.id
+
+    def test_toggle_pin_does_not_create_version(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+        versions_before = tmp_db.count_versions(created.id)
+
+        tmp_db.toggle_pin(created.id)
+        versions_after = tmp_db.count_versions(created.id)
+
+        assert versions_after == versions_before
+
+    def test_multiple_updates_create_multiple_versions(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+
+        for i in range(10):
+            created.content = f"content version {i + 2}"
+            tmp_db.update(created)
+
+        versions = tmp_db.get_versions(created.id)
+        assert len(versions) == 11
+
+        for i, version in enumerate(versions):
+            expected_version = 11 - i
+            assert version.version == expected_version
+
+    def test_version_has_timestamp(self, tmp_db, sample_snippet):
+        import time
+
+        created = tmp_db.create(sample_snippet)
+        v1 = tmp_db.get_version(created.id, 1)
+        assert v1 is not None
+        assert v1.created_at is not None
+
+        time.sleep(0.001)
+        created.content = "updated"
+        tmp_db.update(created)
+
+        v2 = tmp_db.get_version(created.id, 2)
+        assert v2 is not None
+        assert v2.created_at > v1.created_at
+
+    def test_version_short_summary(self, tmp_db):
+        snippet = Snippet(title="Test", content="first line\nsecond line")
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.short_summary == "first line"
+
+
+class TestVersionTrackingEdgeCases:
+    def test_update_without_changes_still_creates_version(self, tmp_db, sample_snippet):
+        import time
+
+        created = tmp_db.create(sample_snippet)
+        versions_before = tmp_db.count_versions(created.id)
+
+        time.sleep(0.001)
+        tmp_db.update(created)
+
+        versions_after = tmp_db.count_versions(created.id)
+        assert versions_after == versions_before + 1
+
+    def test_empty_content_versions(self, tmp_db):
+        snippet = Snippet(title="Empty", content="")
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.content == ""
+
+    def test_special_characters_in_version_content(self, tmp_db):
+        special_content = 'line with "quotes" and \'single quotes\' and \nnewlines'
+        snippet = Snippet(title="Special", content=special_content)
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.content == special_content
+
+    def test_unicode_content_in_version(self, tmp_db):
+        unicode_content = "中文内容\n日本語\n한국어\nemoji: 🎉🚀✨"
+        snippet = Snippet(title="Unicode", content=unicode_content)
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.content == unicode_content
+
+    def test_restore_to_latest_version_creates_new_version(self, tmp_db, sample_snippet):
+        created = tmp_db.create(sample_snippet)
+
+        created.content = "update 1"
+        tmp_db.update(created)
+
+        versions_before_restore = tmp_db.count_versions(created.id)
+        assert versions_before_restore == 2
+
+        tmp_db.restore_version(created.id, 2)
+
+        versions_after_restore = tmp_db.count_versions(created.id)
+        assert versions_after_restore == 3
+
+    def test_empty_tags_in_version(self, tmp_db):
+        snippet = Snippet(title="No Tags", content="content", tags=[])
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.tags == []
+
+    def test_very_long_content_in_version(self, tmp_db):
+        long_content = "x" * 10000
+        snippet = Snippet(title="Long", content=long_content)
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.content == long_content
+
+    def test_version_for_snippet_without_description(self, tmp_db):
+        snippet = Snippet(title="No Desc", content="content", description="")
+        created = tmp_db.create(snippet)
+
+        version = tmp_db.get_version(created.id, 1)
+        assert version is not None
+        assert version.description == ""
+
+    def test_multiple_snippets_versions_independent(self, tmp_db):
+        snippet1 = Snippet(title="Snippet 1", content="content 1")
+        snippet2 = Snippet(title="Snippet 2", content="content 2")
+
+        created1 = tmp_db.create(snippet1)
+        created2 = tmp_db.create(snippet2)
+
+        created1.content = "update 1-1"
+        tmp_db.update(created1)
+
+        created1.content = "update 1-2"
+        tmp_db.update(created1)
+
+        created2.content = "update 2-1"
+        tmp_db.update(created2)
+
+        assert tmp_db.count_versions(created1.id) == 3
+        assert tmp_db.count_versions(created2.id) == 2
+
+        versions1 = tmp_db.get_versions(created1.id)
+        versions2 = tmp_db.get_versions(created2.id)
+
+        assert all(v.snippet_id == created1.id for v in versions1)
+        assert all(v.snippet_id == created2.id for v in versions2)
