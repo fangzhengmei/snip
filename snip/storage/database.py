@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 
@@ -151,7 +152,7 @@ class Database:
         self._db_path.unlink()
 
     def _init_index(self) -> None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             pragma = {
                 row["name"]: row["type"]
                 for row in conn.execute("PRAGMA table_info(snippets)").fetchall()
@@ -185,10 +186,11 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_snippet_versions_snippet_id
                 ON snippet_versions(snippet_id)
             """)
+            conn.commit()
 
     def _sync(self) -> None:
         file_snippets = {s.id: s for s in self._read_all_files()}
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             db_state = {
                 row["id"]: row["updated_at"]
                 for row in conn.execute("SELECT id, updated_at FROM snippets").fetchall()
@@ -199,6 +201,7 @@ class Database:
             for sid in db_state:
                 if sid not in file_snippets:
                     conn.execute("DELETE FROM snippets WHERE id = ?", (sid,))
+            conn.commit()
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -287,20 +290,21 @@ class Database:
         snippet.created_at = now
         snippet.updated_at = now
         self._write_file(snippet)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             self._upsert_index(conn, snippet)
             self._create_version(conn, snippet, version=1)
+            conn.commit()
         return snippet
 
     def get_all(self) -> list[Snippet]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             rows = conn.execute(
                 "SELECT * FROM snippets ORDER BY pinned DESC, updated_at DESC"
             ).fetchall()
         return [_row_to_snippet(row) for row in rows]
 
     def get_by_id(self, snippet_id: str) -> Snippet | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT * FROM snippets WHERE id = ?", (snippet_id,)
             ).fetchone()
@@ -309,17 +313,19 @@ class Database:
     def update(self, snippet: Snippet, create_version: bool = True) -> Snippet:
         snippet.updated_at = _now()
         self._write_file(snippet)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             self._upsert_index(conn, snippet)
             if create_version:
                 self._create_version(conn, snippet)
+            conn.commit()
         return snippet
 
     def delete(self, snippet_id: str) -> bool:
         deleted = self._delete_file(snippet_id)
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
             conn.execute("DELETE FROM snippet_versions WHERE snippet_id = ?", (snippet_id,))
+            conn.commit()
         return deleted
 
     def search(self, query: str) -> list[Snippet]:
@@ -334,11 +340,11 @@ class Database:
         return snippet.pinned
 
     def count(self) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             return conn.execute("SELECT COUNT(*) as n FROM snippets").fetchone()["n"]
 
     def get_versions(self, snippet_id: str) -> list[SnippetVersion]:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             rows = conn.execute(
                 """
                 SELECT * FROM snippet_versions
@@ -350,7 +356,7 @@ class Database:
         return [_row_to_version(row) for row in rows]
 
     def get_version(self, snippet_id: str, version: int) -> SnippetVersion | None:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 """
                 SELECT * FROM snippet_versions
@@ -371,7 +377,7 @@ class Database:
         return self.update(restored, create_version=True)
 
     def count_versions(self, snippet_id: str) -> int:
-        with self._connect() as conn:
+        with closing(self._connect()) as conn:
             row = conn.execute(
                 "SELECT COUNT(*) as n FROM snippet_versions WHERE snippet_id = ?",
                 (snippet_id,)
