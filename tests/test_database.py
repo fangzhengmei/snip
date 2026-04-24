@@ -573,3 +573,61 @@ class TestVersionTrackingEdgeCases:
 
         assert all(v.snippet_id == created1.id for v in versions1)
         assert all(v.snippet_id == created2.id for v in versions2)
+
+
+class TestVersionLimit:
+    def test_versions_limited_to_50(self, tmp_db):
+        snippet = Snippet(title="Test Limit", content="v1")
+        created = tmp_db.create(snippet)
+
+        for i in range(60):
+            created.content = f"update {i + 2}"
+            tmp_db.update(created)
+
+        count = tmp_db.count_versions(created.id)
+        assert count == 50
+
+        versions = tmp_db.get_versions(created.id)
+        version_numbers = [v.version for v in versions]
+
+        assert version_numbers[0] == 61
+        assert version_numbers[-1] == 12
+
+        assert tmp_db.get_version(created.id, 1) is None
+        assert tmp_db.get_version(created.id, 11) is None
+        assert tmp_db.get_version(created.id, 12) is not None
+
+    def test_versions_under_limit_not_pruned(self, tmp_db):
+        snippet = Snippet(title="Test Under Limit", content="v1")
+        created = tmp_db.create(snippet)
+
+        for i in range(30):
+            created.content = f"update {i + 2}"
+            tmp_db.update(created)
+
+        count = tmp_db.count_versions(created.id)
+        assert count == 31
+
+        assert tmp_db.get_version(created.id, 1) is not None
+        assert tmp_db.get_version(created.id, 31) is not None
+
+    def test_multiple_snippets_prune_independently(self, tmp_db):
+        snippet1 = Snippet(title="Snippet 1", content="v1")
+        snippet2 = Snippet(title="Snippet 2", content="v1")
+
+        created1 = tmp_db.create(snippet1)
+        created2 = tmp_db.create(snippet2)
+
+        for i in range(60):
+            created1.content = f"update {i + 2}"
+            tmp_db.update(created1)
+
+        for i in range(10):
+            created2.content = f"update {i + 2}"
+            tmp_db.update(created2)
+
+        assert tmp_db.count_versions(created1.id) == 50
+        assert tmp_db.count_versions(created2.id) == 11
+
+        assert tmp_db.get_version(created1.id, 1) is None
+        assert tmp_db.get_version(created2.id, 1) is not None

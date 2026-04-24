@@ -10,6 +10,7 @@ from pathlib import Path
 from snip.models.snippet import Snippet, SnippetVersion
 
 _SEP = "\n---\n"
+_MAX_VERSIONS = 50
 
 
 def _now() -> datetime:
@@ -255,6 +256,27 @@ class Database:
         ).fetchone()
         return (row["max_ver"] or 0) + 1
 
+    def _prune_old_versions(self, conn: sqlite3.Connection, snippet_id: str) -> None:
+        count_row = conn.execute(
+            "SELECT COUNT(*) as n FROM snippet_versions WHERE snippet_id = ?",
+            (snippet_id,)
+        ).fetchone()
+        count = count_row["n"]
+        if count > _MAX_VERSIONS:
+            excess = count - _MAX_VERSIONS
+            conn.execute(
+                """
+                DELETE FROM snippet_versions
+                WHERE snippet_id = ? AND version IN (
+                    SELECT version FROM snippet_versions
+                    WHERE snippet_id = ?
+                    ORDER BY version ASC
+                    LIMIT ?
+                )
+                """,
+                (snippet_id, snippet_id, excess),
+            )
+
     def _create_version(self, conn: sqlite3.Connection, snippet: Snippet, version: int | None = None) -> SnippetVersion:
         if version is None:
             version = self._get_next_version(conn, snippet.id)
@@ -282,6 +304,7 @@ class Database:
                 version_record.created_at.isoformat(),
             ),
         )
+        self._prune_old_versions(conn, snippet.id)
         return version_record
 
     def create(self, snippet: Snippet) -> Snippet:
