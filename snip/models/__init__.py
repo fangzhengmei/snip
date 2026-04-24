@@ -1,3 +1,3 @@
-from snip.models.snippet import Snippet
+from snip.models.snippet import Snippet, SnippetVersion
 
-__all__ = ["Snippet"]
+__all__ = ["Snippet", "SnippetVersion"]

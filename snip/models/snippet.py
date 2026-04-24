@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -8,6 +9,67 @@ SUPPORTED_LANGUAGES = [
     "c", "cpp", "java", "json", "yaml", "toml", "sql", "html", "css",
     "markdown", "dockerfile", "powershell", "ruby", "php", "swift", "kotlin",
 ]
+
+
+@dataclass
+class SnippetVersion:
+    snippet_id: str
+    title: str
+    content: str
+    language: str
+    description: str
+    tags: list[str]
+    version: int
+    id: str | None = None
+    created_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.created_at is None:
+            self.created_at = datetime.now()
+
+    @property
+    def short_summary(self) -> str:
+        first_line = self.content.strip().splitlines()[0] if self.content.strip() else ""
+        return first_line[:50] + ("…" if len(first_line) > 50 else "")
+
+    def to_snapshot_json(self) -> str:
+        return json.dumps({
+            "title": self.title,
+            "content": self.content,
+            "language": self.language,
+            "description": self.description,
+            "tags": self.tags,
+        }, ensure_ascii=False)
+
+    @classmethod
+    def from_snapshot_json(cls, snippet_id: str, version: int, snapshot_json: str, created_at: datetime | None = None) -> "SnippetVersion":
+        data = json.loads(snapshot_json)
+        return cls(
+            snippet_id=snippet_id,
+            title=data["title"],
+            content=data["content"],
+            language=data["language"],
+            description=data["description"],
+            tags=data["tags"],
+            version=version,
+            created_at=created_at,
+        )
+
+    def to_snippet(self, existing_snippet: Snippet | None = None) -> Snippet:
+        if existing_snippet:
+            existing_snippet.title = self.title
+            existing_snippet.content = self.content
+            existing_snippet.language = self.language
+            existing_snippet.description = self.description
+            existing_snippet.tags = self.tags
+            return existing_snippet
+        return Snippet(
+            title=self.title,
+            content=self.content,
+            language=self.language,
+            description=self.description,
+            tags=self.tags,
+        )
 
 
 @dataclass

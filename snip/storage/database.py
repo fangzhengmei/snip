@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from snip.models.snippet import Snippet
+from snip.models.snippet import Snippet, SnippetVersion
 
 _SEP = "\n---\n"
 
@@ -98,6 +98,15 @@ def _row_to_snippet_legacy(row: sqlite3.Row) -> Snippet:
     )
 
 
+def _row_to_version(row: sqlite3.Row) -> SnippetVersion:
+    return SnippetVersion.from_snapshot_json(
+        snippet_id=row["snippet_id"],
+        version=row["version"],
+        snapshot_json=row["snapshot"],
+        created_at=datetime.fromisoformat(row["created_at"]),
+    )
+
+
 class Database:
     def __init__(self, snippets_dir: Path) -> None:
         self._dir = snippets_dir
@@ -162,6 +171,20 @@ class Database:
                     updated_at  TEXT NOT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS snippet_versions (
+                    id          TEXT PRIMARY KEY,
+                    snippet_id  TEXT NOT NULL,
+                    version     INTEGER NOT NULL,
+                    snapshot    TEXT NOT NULL,
+                    created_at  TEXT NOT NULL,
+                    UNIQUE(snippet_id, version)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_snippet_versions_snippet_id
+                ON snippet_versions(snippet_id)
+            """)
 
     def _sync(self) -> None:
         file_snippets = {s.id: s for s in self._read_all_files()}
@@ -222,6 +245,42 @@ class Database:
             ),
         )
 
+    def _get_next_version(self, conn: sqlite3.Connection, snippet_id: str) -> int:
+        row = conn.execute(
+            "SELECT MAX(version) as max_ver FROM snippet_versions WHERE snippet_id = ?",
+            (snippet_id,)
+        ).fetchone()
+        return (row["max_ver"] or 0) + 1
+
+    def _create_version(self, conn: sqlite3.Connection, snippet: Snippet, version: int | None = None) -> SnippetVersion:
+        if version is None:
+            version = self._get_next_version(conn, snippet.id)
+        version_record = SnippetVersion(
+            id=uuid.uuid4().hex[:12],
+            snippet_id=snippet.id,
+            title=snippet.title,
+            content=snippet.content,
+            language=snippet.language,
+            description=snippet.description,
+            tags=list(snippet.tags),
+            version=version,
+            created_at=_now(),
+        )
+        conn.execute(
+            """
+            INSERT INTO snippet_versions (id, snippet_id, version, snapshot, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                version_record.id,
+                version_record.snippet_id,
+                version_record.version,
+                version_record.to_snapshot_json(),
+                version_record.created_at.isoformat(),
+            ),
+        )
+        return version_record
+
     def create(self, snippet: Snippet) -> Snippet:
         now = _now()
         snippet.id = uuid.uuid4().hex[:12]
@@ -230,6 +289,7 @@ class Database:
         self._write_file(snippet)
         with self._connect() as conn:
             self._upsert_index(conn, snippet)
+            self._create_version(conn, snippet, version=1)
         return snippet
 
     def get_all(self) -> list[Snippet]:
@@ -246,17 +306,20 @@ class Database:
             ).fetchone()
         return _row_to_snippet(row) if row else None
 
-    def update(self, snippet: Snippet) -> Snippet:
+    def update(self, snippet: Snippet, create_version: bool = True) -> Snippet:
         snippet.updated_at = _now()
         self._write_file(snippet)
         with self._connect() as conn:
             self._upsert_index(conn, snippet)
+            if create_version:
+                self._create_version(conn, snippet)
         return snippet
 
     def delete(self, snippet_id: str) -> bool:
         deleted = self._delete_file(snippet_id)
         with self._connect() as conn:
             conn.execute("DELETE FROM snippets WHERE id = ?", (snippet_id,))
+            conn.execute("DELETE FROM snippet_versions WHERE snippet_id = ?", (snippet_id,))
         return deleted
 
     def search(self, query: str) -> list[Snippet]:
@@ -267,9 +330,50 @@ class Database:
         if snippet is None:
             return False
         snippet.pinned = not snippet.pinned
-        self.update(snippet)
+        self.update(snippet, create_version=False)
         return snippet.pinned
 
     def count(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) as n FROM snippets").fetchone()["n"]
+
+    def get_versions(self, snippet_id: str) -> list[SnippetVersion]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM snippet_versions
+                WHERE snippet_id = ?
+                ORDER BY version DESC
+                """,
+                (snippet_id,)
+            ).fetchall()
+        return [_row_to_version(row) for row in rows]
+
+    def get_version(self, snippet_id: str, version: int) -> SnippetVersion | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM snippet_versions
+                WHERE snippet_id = ? AND version = ?
+                """,
+                (snippet_id, version)
+            ).fetchone()
+        return _row_to_version(row) if row else None
+
+    def restore_version(self, snippet_id: str, version: int) -> Snippet | None:
+        snippet = self.get_by_id(snippet_id)
+        if snippet is None:
+            return None
+        version_record = self.get_version(snippet_id, version)
+        if version_record is None:
+            return None
+        restored = version_record.to_snippet(existing_snippet=snippet)
+        return self.update(restored, create_version=True)
+
+    def count_versions(self, snippet_id: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) as n FROM snippet_versions WHERE snippet_id = ?",
+                (snippet_id,)
+            ).fetchone()
+            return row["n"]

@@ -28,6 +28,7 @@ class MainScreen(Screen):
         Binding("d", "delete_snippet", "Delete"),
         Binding("y", "yank_snippet", "Copy"),
         Binding("p", "pin_snippet", "Pin"),
+        Binding("v", "version_history", "History"),
         Binding("/", "focus_search", "Search"),
         Binding("escape", "clear_search", "Clear", show=False),
         Binding("q", "quit", "Quit"),
@@ -180,6 +181,29 @@ class MainScreen(Screen):
         self._refresh_list(self._query, select_id=snippet_id)
         state = "pinned" if pinned else "unpinned"
         self._flash(f"\u2018{snippet.title}\u2019 {state}")
+
+    def action_version_history(self) -> None:
+        from snip.ui.screens.version_history_screen import VersionHistoryScreen
+
+        snippet = self.query_one("#snippet-list", SnippetList).highlighted_snippet()
+        if snippet is None or snippet.id is None:
+            return
+
+        versions = self._db.get_versions(snippet.id)
+
+        def _on_result(result: tuple[int, bool] | None) -> None:
+            if result is None:
+                return
+            version, should_restore = result
+            if should_restore:
+                restored = self._db.restore_version(snippet.id, version)
+                if restored:
+                    self._refresh_list(self._query, select_id=restored.id)
+                    self._flash(f"restored {restored.title} to version {version}")
+                else:
+                    self._flash(f"failed to restore version {version}")
+
+        self.app.push_screen(VersionHistoryScreen(snippet, versions), _on_result)
 
     def action_quit(self) -> None:
         self.app.exit()

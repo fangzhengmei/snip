@@ -329,3 +329,124 @@ EditScreen #btn-cancel:hover {
     background: $snip-pill-bg-hover;
     color: $snip-text;
 }
+
+
+/* ── VersionHistoryScreen ───────────────────────────────────── */
+
+VersionHistoryScreen {
+    align: center middle;
+    background: $snip-bg;
+}
+
+VersionHistoryScreen > Vertical {
+    background: $snip-panel;
+    border: tall $snip-border;
+    height: 95%;
+    overflow-y: auto;
+    padding: 1 3;
+    width: 90%;
+    min-width: 80;
+}
+
+VersionHistoryScreen .modal-title {
+    color: $snip-accent;
+    height: auto;
+    margin-bottom: 1;
+    text-style: bold;
+}
+
+VersionHistoryScreen .modal-divider {
+    color: $snip-text-ghost;
+    height: 1;
+}
+
+VersionHistoryScreen .form-label {
+    color: $snip-text-muted;
+    height: 1;
+}
+
+VersionHistoryScreen .version-panels {
+    height: 1fr;
+    min-height: 10;
+}
+
+VersionHistoryScreen #version-list-container {
+    width: 40%;
+    min-width: 30;
+    border-right: tall $snip-border-dim;
+    padding-right: 1;
+}
+
+VersionHistoryScreen #version-list {
+    background: $snip-bg;
+    border: tall $snip-border;
+    height: 1fr;
+}
+
+VersionHistoryScreen #version-list ListItem {
+    background: $snip-bg;
+    border-bottom: tall $snip-border-dim;
+    padding: 1 2;
+}
+
+VersionHistoryScreen #version-list ListItem:hover {
+    background: $snip-hover-bg;
+}
+
+VersionHistoryScreen #version-list ListItem.-highlighted {
+    background: $snip-select-bg;
+    border-left: tall $snip-accent;
+    padding-left: 1;
+}
+
+VersionHistoryScreen #version-detail-container {
+    width: 1fr;
+    padding-left: 1;
+}
+
+VersionHistoryScreen .version-header {
+    background: $snip-surface;
+    border: tall $snip-border;
+    color: $snip-text;
+    padding: 1 2;
+    margin-bottom: 1;
+    height: auto;
+}
+
+VersionHistoryScreen #version-content {
+    background: $snip-bg;
+    border: tall $snip-border;
+    height: 1fr;
+    color: $snip-text;
+}
+
+VersionHistoryScreen .btn-row {
+    align: right middle;
+    height: 3;
+    padding-top: 1;
+}
+
+VersionHistoryScreen Button {
+    margin-left: 1;
+}
+
+VersionHistoryScreen #btn-restore {
+    background: $snip-accent;
+    border: none;
+    color: $snip-bg;
+}
+
+VersionHistoryScreen #btn-restore:hover {
+    background: $snip-accent-hover;
+}
+
+VersionHistoryScreen #btn-cancel {
+    background: $snip-pill-bg;
+    border: none;
+    color: $snip-text-muted;
+}
+
+VersionHistoryScreen #btn-cancel:hover {
+    background: $snip-pill-bg-hover;
+    color: $snip-text;
+}
