@@ -149,3 +149,121 @@ class TestGroupValidation:
         assert screen._is_duplicate_name("Python") is False
         assert screen._is_duplicate_name("Java") is True
         assert screen._is_duplicate_name("NewName") is False
+
+
+class TestNestedGroups:
+    def test_create_nested_groups(self, tmp_db):
+        work = tmp_db.create_group(Group(name="Work"))
+        python = tmp_db.create_group(Group(name="Python", parent_id=work.id))
+        db = tmp_db.create_group(Group(name="Database", parent_id=work.id))
+
+        assert python.parent_id == work.id
+        assert db.parent_id == work.id
+
+        top_level = tmp_db.get_groups_by_parent(None)
+        assert len(top_level) == 1
+        assert top_level[0].name == "Work"
+
+        children = tmp_db.get_groups_by_parent(work.id)
+        assert len(children) == 2
+        child_names = {c.name for c in children}
+        assert child_names == {"Python", "Database"}
+
+    def test_get_by_group_with_descendants(self, tmp_db):
+        work = tmp_db.create_group(Group(name="Work"))
+        python = tmp_db.create_group(Group(name="Python", parent_id=work.id))
+        db = tmp_db.create_group(Group(name="Database", parent_id=work.id))
+
+        tmp_db.create(Snippet(title="Work Note", content="a", group_id=work.id))
+        tmp_db.create(Snippet(title="Python List", content="b", group_id=python.id))
+        tmp_db.create(Snippet(title="SQL Query", content="c", group_id=db.id))
+        tmp_db.create(Snippet(title="Outside", content="d"))
+
+        direct = tmp_db.get_by_group(work.id)
+        assert len(direct) == 1
+        assert direct[0].title == "Work Note"
+
+        with_descendants = tmp_db.get_by_group_with_descendants(work.id)
+        assert len(with_descendants) == 3
+        titles = {s.title for s in with_descendants}
+        assert titles == {"Work Note", "Python List", "SQL Query"}
+
+    def test_count_group_with_descendants(self, tmp_db):
+        work = tmp_db.create_group(Group(name="Work"))
+        python = tmp_db.create_group(Group(name="Python", parent_id=work.id))
+
+        tmp_db.create(Snippet(title="A", content="a", group_id=work.id))
+        tmp_db.create(Snippet(title="B", content="b", group_id=python.id))
+        tmp_db.create(Snippet(title="C", content="c", group_id=python.id))
+
+        assert tmp_db.count_group(work.id) == 1
+        assert tmp_db.count_group_with_descendants(work.id) == 3
+
+    def test_search_by_group_with_descendants(self, tmp_db):
+        work = tmp_db.create_group(Group(name="Work"))
+        python = tmp_db.create_group(Group(name="Python", parent_id=work.id))
+
+        tmp_db.create(Snippet(title="Work Note", content="test", group_id=work.id))
+        tmp_db.create(Snippet(title="Python Utils", content="python test", group_id=python.id))
+
+        direct = tmp_db.search_by_group("test", work.id)
+        assert len(direct) == 1
+
+        with_descendants = tmp_db.search_by_group_with_descendants("test", work.id)
+        assert len(with_descendants) == 2
+
+    def test_cannot_set_parent_to_self_descendant(self):
+        from snip.models.group import Group
+
+        work = Group(name="Work", id="work_id")
+        python = Group(name="Python", id="python_id", parent_id="work_id")
+        utils = Group(name="Utils", id="utils_id", parent_id="python_id")
+
+        existing = [work, python, utils]
+
+        from snip.ui.screens.group_edit_screen import GroupEditScreen
+        screen = GroupEditScreen(group=work, existing_groups=existing)
+
+        descendants = screen._get_all_descendants("work_id")
+        assert "python_id" in descendants
+        assert "utils_id" in descendants
+
+        parent_options = screen._get_valid_parent_options()
+        parent_ids = [opt[1] for opt in parent_options]
+
+        assert "python_id" not in parent_ids
+        assert "utils_id" not in parent_ids
+
+    def test_three_level_nesting(self, tmp_db):
+        work = tmp_db.create_group(Group(name="Work"))
+        python = tmp_db.create_group(Group(name="Python", parent_id=work.id))
+        utils = tmp_db.create_group(Group(name="Utils", parent_id=python.id))
+
+        assert work.parent_id is None
+        assert python.parent_id == work.id
+        assert utils.parent_id == python.id
+
+        tmp_db.create(Snippet(title="A", content="a", group_id=work.id))
+        tmp_db.create(Snippet(title="B", content="b", group_id=python.id))
+        tmp_db.create(Snippet(title="C", content="c", group_id=utils.id))
+
+        assert tmp_db.count_group_with_descendants(work.id) == 3
+        assert tmp_db.count_group_with_descendants(python.id) == 2
+        assert tmp_db.count_group_with_descendants(utils.id) == 1
+
+    def test_delete_parent_moves_children_up(self, tmp_db):
+        work = tmp_db.create_group(Group(name="Work"))
+        python = tmp_db.create_group(Group(name="Python", parent_id=work.id))
+        utils = tmp_db.create_group(Group(name="Utils", parent_id=python.id))
+
+        tmp_db.delete_group(python.id)
+
+        work_fetched = tmp_db.get_group_by_id(work.id)
+        assert work_fetched is not None
+
+        utils_fetched = tmp_db.get_group_by_id(utils.id)
+        assert utils_fetched is not None
+        assert utils_fetched.parent_id == work.id
+
+        python_fetched = tmp_db.get_group_by_id(python.id)
+        assert python_fetched is None

@@ -439,6 +439,56 @@ class Database:
         snippets = self.get_by_group(group_id)
         return [s for s in snippets if s.matches(query)]
 
+    def _get_all_descendant_group_ids(self, group_id: str) -> list[str]:
+        """Get all descendant group IDs (children, grandchildren, etc.) recursively."""
+        descendants: list[str] = []
+        to_check = [group_id]
+
+        while to_check:
+            current = to_check.pop()
+            children = self.get_groups_by_parent(current)
+            for child in children:
+                if child.id and child.id not in descendants:
+                    descendants.append(child.id)
+                    to_check.append(child.id)
+
+        return descendants
+
+    def get_by_group_with_descendants(self, group_id: str | None) -> list[Snippet]:
+        """Get snippets from a group AND all its descendant groups."""
+        if group_id is None:
+            return self.get_all()
+
+        all_group_ids = [group_id] + self._get_all_descendant_group_ids(group_id)
+
+        with self._connect() as conn:
+            placeholders = ",".join(["?" for _ in all_group_ids])
+            query = f"""
+                SELECT * FROM snippets
+                WHERE group_id IN ({placeholders})
+                ORDER BY pinned DESC, updated_at DESC
+            """
+            rows = conn.execute(query, all_group_ids).fetchall()
+        return [_row_to_snippet(row) for row in rows]
+
+    def search_by_group_with_descendants(self, query: str, group_id: str | None) -> list[Snippet]:
+        """Search snippets in a group AND all its descendant groups."""
+        snippets = self.get_by_group_with_descendants(group_id)
+        return [s for s in snippets if s.matches(query)]
+
+    def count_group_with_descendants(self, group_id: str | None) -> int:
+        """Count snippets in a group AND all its descendant groups."""
+        if group_id is None:
+            return self.count()
+
+        all_group_ids = [group_id] + self._get_all_descendant_group_ids(group_id)
+
+        with self._connect() as conn:
+            placeholders = ",".join(["?" for _ in all_group_ids])
+            query = f"SELECT COUNT(*) as n FROM snippets WHERE group_id IN ({placeholders})"
+            row = conn.execute(query, all_group_ids).fetchone()
+        return row["n"]
+
     def count_group(self, group_id: str | None) -> int:
         with self._connect() as conn:
             if group_id is None:
