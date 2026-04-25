@@ -312,9 +312,15 @@ class MainScreen(Screen):
         group_name = group.name
         group_id = group.id
 
-        snippet_count = self._db.count_group(group_id)
-        if snippet_count > 0:
-            self._flash(f"group \u2018{group_name}\u2019 has {snippet_count} snippet(s) - move them first")
+        direct_snippets = self._db.count_group(group_id)
+        total_snippets = self._db.count_group_with_descendants(group_id)
+
+        if total_snippets > 0:
+            if direct_snippets == total_snippets:
+                self._flash(f"group \u2018{group_name}\u2019 has {total_snippets} snippet(s) - move them first")
+            else:
+                child_snippets = total_snippets - direct_snippets
+                self._flash(f"group \u2018{group_name}\u2019 has {total_snippets} snippet(s) ({direct_snippets} direct + {child_snippets} in subgroups) - move them first")
             return
 
         self._db.delete_group(group_id)
