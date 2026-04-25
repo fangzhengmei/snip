@@ -87,12 +87,12 @@ class MainScreen(Screen):
             if group_id is None:
                 snippets = self._db.search(query)
             else:
-                snippets = self._db.search_by_group(query, group_id)
+                snippets = self._db.search_by_group_with_descendants(query, group_id)
         else:
             if group_id is None:
                 snippets = self._db.get_all()
             else:
-                snippets = self._db.get_by_group(group_id)
+                snippets = self._db.get_by_group_with_descendants(group_id)
 
         sl: SnippetList = self.query_one("#snippet-list", SnippetList)
         sl.snippets = snippets
@@ -115,7 +115,7 @@ class MainScreen(Screen):
         if group_id is None:
             total = self._db.count()
         else:
-            total = self._db.count_group(group_id)
+            total = self._db.count_group_with_descendants(group_id)
         self._update_status(len(snippets), total)
 
     def _update_preview(self, snippet: Snippet | None) -> None:
