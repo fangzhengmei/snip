@@ -273,13 +273,15 @@ class MainScreen(Screen):
     def action_new_group(self) -> None:
         from snip.ui.screens.group_edit_screen import GroupEditScreen
 
+        existing_groups = self._db.get_all_groups()
+
         def _on_result(result: Group | None) -> None:
             if result is not None:
                 self._db.create_group(result)
                 self._refresh_groups()
                 self._flash(f"created group \u2018{result.name}\u2019")
 
-        self.app.push_screen(GroupEditScreen(), _on_result)
+        self.app.push_screen(GroupEditScreen(existing_groups=existing_groups), _on_result)
 
     def action_rename_group(self) -> None:
         from snip.ui.screens.group_edit_screen import GroupEditScreen
@@ -290,13 +292,15 @@ class MainScreen(Screen):
             self._flash("no group selected")
             return
 
+        existing_groups = self._db.get_all_groups()
+
         def _on_result(result: Group | None) -> None:
             if result is not None:
                 self._db.update_group(result)
                 self._refresh_groups()
                 self._flash(f"renamed group to \u2018{result.name}\u2019")
 
-        self.app.push_screen(GroupEditScreen(group), _on_result)
+        self.app.push_screen(GroupEditScreen(group, existing_groups=existing_groups), _on_result)
 
     def action_delete_group(self) -> None:
         gl: GroupList = self.query_one("#group-list", GroupList)

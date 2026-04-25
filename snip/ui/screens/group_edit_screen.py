@@ -4,7 +4,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, TextArea
+from textual.widgets import Button, Input, Label, Static, TextArea
 
 from snip.models.group import Group
 
@@ -27,10 +27,15 @@ class GroupEditScreen(ModalScreen[Group | None]):
         "btn-save",
     ]
 
-    def __init__(self, group: Group | None = None) -> None:
+    def __init__(
+        self,
+        group: Group | None = None,
+        existing_groups: list[Group] | None = None,
+    ) -> None:
         super().__init__()
         self._editing = group
         self._is_new = group is None
+        self._existing_groups = existing_groups or []
 
     def compose(self) -> ComposeResult:
         g = self._editing
@@ -49,6 +54,7 @@ class GroupEditScreen(ModalScreen[Group | None]):
                 placeholder="e.g. Python Utilities",
                 id="input-name",
             )
+            yield Static("", id="error-message", classes="error-message")
 
             yield Label("description (optional)", classes="form-label")
             yield TextArea(
@@ -68,6 +74,21 @@ class GroupEditScreen(ModalScreen[Group | None]):
             with Horizontal(classes="btn-row"):
                 yield Button("cancel", variant="default", id="btn-cancel")
                 yield Button("save", variant="primary", id="btn-save")
+
+    def _show_error(self, message: str) -> None:
+        error_label = self.query_one("#error-message", Static)
+        error_label.update(f"[#f7768e]\u26a0  {message}[/#f7768e]")
+
+    def _clear_error(self) -> None:
+        error_label = self.query_one("#error-message", Static)
+        error_label.update("")
+
+    def _is_duplicate_name(self, name: str) -> bool:
+        current_id = self._editing.id if self._editing else None
+        for group in self._existing_groups:
+            if group.name.lower() == name.lower() and group.id != current_id:
+                return True
+        return False
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._navigate(+1)
@@ -122,9 +143,18 @@ class GroupEditScreen(ModalScreen[Group | None]):
 
     def _save(self) -> None:
         name = self.query_one("#input-name", Input).value.strip()
+
         if not name:
+            self._show_error("Group name cannot be empty")
             self.query_one("#input-name", Input).focus()
             return
+
+        if self._is_duplicate_name(name):
+            self._show_error(f"A group named '{name}' already exists")
+            self.query_one("#input-name", Input).focus()
+            return
+
+        self._clear_error()
 
         description = self.query_one("#input-description", TextArea).text.strip()
         color = self.query_one("#input-color", Input).value.strip()

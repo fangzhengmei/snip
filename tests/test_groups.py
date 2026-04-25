@@ -119,3 +119,33 @@ class TestGroupSnippets:
 
         snippet_fetched = tmp_db.get_by_id(snippet.id)
         assert snippet_fetched.group_id is None
+
+
+class TestGroupValidation:
+    def test_duplicate_name_check(self):
+        from snip.models.group import Group
+
+        group1 = Group(name="Python", id="id1")
+        group2 = Group(name="python", id="id2")
+        existing = [group1]
+
+        from snip.ui.screens.group_edit_screen import GroupEditScreen
+        screen = GroupEditScreen(existing_groups=existing)
+
+        assert screen._is_duplicate_name("Python") is True
+        assert screen._is_duplicate_name("PYTHON") is True
+        assert screen._is_duplicate_name("Java") is False
+
+    def test_edit_same_name_not_duplicate(self):
+        from snip.models.group import Group
+
+        group1 = Group(name="Python", id="id1")
+        group2 = Group(name="Java", id="id2")
+        existing = [group1, group2]
+
+        from snip.ui.screens.group_edit_screen import GroupEditScreen
+        screen = GroupEditScreen(group=group1, existing_groups=existing)
+
+        assert screen._is_duplicate_name("Python") is False
+        assert screen._is_duplicate_name("Java") is True
+        assert screen._is_duplicate_name("NewName") is False

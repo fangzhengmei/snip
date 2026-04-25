@@ -383,3 +383,9 @@ EditScreen #btn-cancel:hover {
     background: $snip-pill-bg-hover;
     color: $snip-text;
 }
+
+EditScreen .error-message {
+    color: $snip-text-muted;
+    height: 1;
+    margin-bottom: 1;
+}
