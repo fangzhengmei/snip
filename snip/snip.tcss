@@ -134,6 +134,60 @@ MainScreen #too-small-overlay Static {
 }
 
 
+/* ── GroupList ─────────────────────────────────────────────── */
+
+GroupList {
+    width: 20%;
+    min-width: 16;
+    background: $snip-bg;
+    border-right: tall $snip-border;
+}
+
+GroupList .panel-label {
+    height: 3;
+    background: $snip-surface;
+    border-bottom: tall $snip-border-dim;
+    color: $snip-text-ghost;
+    padding: 1 2 0 2;
+}
+
+GroupList ListView {
+    background: $snip-bg;
+    border: none;
+    height: 1fr;
+    padding: 0;
+}
+
+
+/* ── GroupItem ─────────────────────────────────────────────── */
+
+GroupItem {
+    background: $snip-bg;
+    border-bottom: tall $snip-border-dim;
+    height: 3;
+    padding: 1 2 0 2;
+}
+
+GroupItem:hover {
+    background: $snip-hover-bg;
+}
+
+GroupItem.-highlighted {
+    background: $snip-select-bg;
+    border-left: tall $snip-accent;
+    padding-left: 1;
+}
+
+GroupItem.-highlighted .group-item-label {
+    color: $snip-text-hi;
+}
+
+GroupItem .group-item-label {
+    color: $snip-text-mid;
+    height: 1;
+}
+
+
 /* ── SnippetList ─────────────────────────────────────────────── */
 
 SnippetList {

@@ -6,6 +6,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, TextArea
 
+from snip.models.group import Group
 from snip.models.snippet import SUPPORTED_LANGUAGES, Snippet
 
 
@@ -21,6 +22,7 @@ class EditScreen(ModalScreen[Snippet | None]):
 
     _FIELDS = [
         "input-title",
+        "input-group",
         "input-language",
         "input-description",
         "input-tags",
@@ -29,10 +31,17 @@ class EditScreen(ModalScreen[Snippet | None]):
         "btn-save",
     ]
 
-    def __init__(self, snippet: Snippet | None = None) -> None:
+    def __init__(
+        self,
+        snippet: Snippet | None = None,
+        group_id: str | None = None,
+        groups: list[Group] | None = None,
+    ) -> None:
         super().__init__()
         self._editing = snippet
         self._is_new = snippet is None
+        self._default_group_id = group_id
+        self._groups = groups or []
 
     def compose(self) -> ComposeResult:
         s = self._editing
@@ -50,6 +59,16 @@ class EditScreen(ModalScreen[Snippet | None]):
                 value=s.title if s else "",
                 placeholder="e.g. reverse a list in Python",
                 id="input-title",
+            )
+
+            yield Label("group", classes="form-label")
+            group_options = self._get_group_options()
+            current_group_id = s.group_id if s else self._default_group_id
+            yield Select(
+                group_options,
+                value=current_group_id,
+                id="input-group",
+                allow_blank=False,
             )
 
             yield Label("language", classes="form-label")
@@ -86,6 +105,13 @@ class EditScreen(ModalScreen[Snippet | None]):
                 yield Button("cancel", variant="default", id="btn-cancel")
                 yield Button("save", variant="primary", id="btn-save")
 
+    def _get_group_options(self) -> list[tuple[str, str | None]]:
+        options = [("All Snippets (No Group)", None)]
+        for group in self._groups:
+            if group.id:
+                options.append((group.name, group.id))
+        return options
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self._navigate(+1)
 
@@ -106,7 +132,6 @@ class EditScreen(ModalScreen[Snippet | None]):
         focused = self.focused
         if focused is None:
             return
-        # If the overlay is open, treat the parent Select as the current position.
         if isinstance(getattr(focused, "parent", None), Select):
             focused = focused.parent
         current_id = getattr(focused, "id", None)
@@ -130,7 +155,6 @@ class EditScreen(ModalScreen[Snippet | None]):
             else:
                 focused.action_cursor_down()
         elif isinstance(getattr(focused, "parent", None), Select):
-            # SelectOverlay is focused — we're inside the open dropdown.
             overlay = focused
             at_bottom = (
                 overlay.highlighted is None
@@ -155,7 +179,6 @@ class EditScreen(ModalScreen[Snippet | None]):
             else:
                 focused.action_cursor_up()
         elif isinstance(getattr(focused, "parent", None), Select):
-            # SelectOverlay is focused — we're inside the open dropdown.
             overlay = focused
             at_top = overlay.highlighted is None or overlay.highlighted <= 0
             if at_top:
@@ -183,6 +206,12 @@ class EditScreen(ModalScreen[Snippet | None]):
         language = (
             str(lang_select.value) if lang_select.value != Select.BLANK else "text"
         )
+
+        group_select: Select = self.query_one("#input-group", Select)
+        group_id = group_select.value if group_select.value != Select.BLANK else None
+        if group_id == "":
+            group_id = None
+
         description = self.query_one("#input-description", Input).value.strip()
         tags = [t for t in self.query_one("#input-tags", Input).value.strip().split() if t]
 
@@ -190,6 +219,7 @@ class EditScreen(ModalScreen[Snippet | None]):
             self._editing.title = title
             self._editing.content = content
             self._editing.language = language
+            self._editing.group_id = group_id
             self._editing.description = description
             self._editing.tags = tags
             self.dismiss(self._editing)
@@ -199,6 +229,7 @@ class EditScreen(ModalScreen[Snippet | None]):
                     title=title,
                     content=content,
                     language=language,
+                    group_id=group_id,
                     description=description,
                     tags=tags,
                 )

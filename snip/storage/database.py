@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from snip.models.group import Group
 from snip.models.snippet import Snippet
 
 _SEP = "\n---\n"
@@ -34,6 +35,10 @@ def _parse_file(text: str) -> Snippet:
     tags_raw = meta.get("tags", "")
     tags = [t.strip() for t in tags_raw.split(",") if t.strip()] if tags_raw else []
 
+    group_id = meta.get("group_id")
+    if group_id == "":
+        group_id = None
+
     return Snippet(
         id=meta["id"],
         title=meta["title"],
@@ -42,6 +47,7 @@ def _parse_file(text: str) -> Snippet:
         description=meta.get("description", ""),
         tags=tags,
         pinned=meta.get("pinned", "false") == "true",
+        group_id=group_id,
         created_at=datetime.fromisoformat(meta["created_at"]),
         updated_at=datetime.fromisoformat(meta["updated_at"]),
     )
@@ -56,17 +62,22 @@ def _to_file_text(snippet: Snippet) -> str:
         f"description: {snippet.description}",
         f"tags: {', '.join(snippet.tags)}",
         f"pinned: {str(snippet.pinned).lower()}",
+    ]
+    if snippet.group_id:
+        lines.append(f"group_id: {snippet.group_id}")
+    lines.extend([
         f"created_at: {snippet.created_at.isoformat()}",
         f"updated_at: {snippet.updated_at.isoformat()}",
         "---",
         snippet.content,
-    ]
+    ])
     return "\n".join(lines)
 
 
 def _row_to_snippet(row: sqlite3.Row) -> Snippet:
     tags_raw = row["tags"]
     tags = json.loads(tags_raw) if tags_raw else []
+    group_id = row["group_id"] if "group_id" in row.keys() and row["group_id"] else None
     return Snippet(
         id=row["id"],
         title=row["title"],
@@ -75,6 +86,7 @@ def _row_to_snippet(row: sqlite3.Row) -> Snippet:
         description=row["description"],
         tags=tags,
         pinned=bool(row["pinned"]),
+        group_id=group_id,
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -93,6 +105,19 @@ def _row_to_snippet_legacy(row: sqlite3.Row) -> Snippet:
         description=row["description"],
         tags=tags,
         pinned=bool(row["pinned"]),
+        created_at=datetime.fromisoformat(row["created_at"]),
+        updated_at=datetime.fromisoformat(row["updated_at"]),
+    )
+
+
+def _row_to_group(row: sqlite3.Row) -> Group:
+    parent_id = row["parent_id"] if row["parent_id"] else None
+    return Group(
+        id=row["id"],
+        name=row["name"],
+        parent_id=parent_id,
+        color=row["color"] if row["color"] else "",
+        description=row["description"] if row["description"] else "",
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
     )
@@ -158,6 +183,24 @@ class Database:
                     description TEXT NOT NULL DEFAULT '',
                     tags        TEXT NOT NULL DEFAULT '[]',
                     pinned      INTEGER NOT NULL DEFAULT 0,
+                    group_id    TEXT,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                )
+            """)
+            if "group_id" not in pragma and pragma:
+                try:
+                    conn.execute("ALTER TABLE snippets ADD COLUMN group_id TEXT")
+                except Exception:
+                    pass
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS groups (
+                    id          TEXT PRIMARY KEY,
+                    name        TEXT NOT NULL,
+                    parent_id   TEXT,
+                    color       TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
                     created_at  TEXT NOT NULL,
                     updated_at  TEXT NOT NULL
                 )
@@ -206,8 +249,8 @@ class Database:
         conn.execute(
             """
             INSERT OR REPLACE INTO snippets
-                (id, title, content, language, description, tags, pinned, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (id, title, content, language, description, tags, pinned, group_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 snippet.id,
@@ -217,6 +260,7 @@ class Database:
                 snippet.description,
                 json.dumps(snippet.tags),
                 int(snippet.pinned),
+                snippet.group_id,
                 snippet.created_at.isoformat(),
                 snippet.updated_at.isoformat(),
             ),
@@ -273,3 +317,137 @@ class Database:
     def count(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) as n FROM snippets").fetchone()["n"]
+
+    def create_group(self, group: Group) -> Group:
+        now = _now()
+        group.id = uuid.uuid4().hex[:12]
+        group.created_at = now
+        group.updated_at = now
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO groups (id, name, parent_id, color, description, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    group.id,
+                    group.name,
+                    group.parent_id,
+                    group.color,
+                    group.description,
+                    group.created_at.isoformat(),
+                    group.updated_at.isoformat(),
+                ),
+            )
+        return group
+
+    def get_all_groups(self) -> list[Group]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM groups ORDER BY name"
+            ).fetchall()
+        return [_row_to_group(row) for row in rows]
+
+    def get_group_by_id(self, group_id: str) -> Group | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM groups WHERE id = ?", (group_id,)
+            ).fetchone()
+        return _row_to_group(row) if row else None
+
+    def get_groups_by_parent(self, parent_id: str | None) -> list[Group]:
+        with self._connect() as conn:
+            if parent_id is None:
+                rows = conn.execute(
+                    "SELECT * FROM groups WHERE parent_id IS NULL ORDER BY name"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM groups WHERE parent_id = ? ORDER BY name",
+                    (parent_id,),
+                ).fetchall()
+        return [_row_to_group(row) for row in rows]
+
+    def update_group(self, group: Group) -> Group:
+        group.updated_at = _now()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE groups
+                SET name = ?, parent_id = ?, color = ?, description = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    group.name,
+                    group.parent_id,
+                    group.color,
+                    group.description,
+                    group.updated_at.isoformat(),
+                    group.id,
+                ),
+            )
+        return group
+
+    def delete_group(self, group_id: str, move_snippets_to: str | None = None) -> bool:
+        with self._connect() as conn:
+            group = self.get_group_by_id(group_id)
+            if group is None:
+                return False
+
+            child_groups = self.get_groups_by_parent(group_id)
+            for child in child_groups:
+                child.parent_id = group.parent_id
+                self.update_group(child)
+
+            conn.execute(
+                "UPDATE snippets SET group_id = ? WHERE group_id = ?",
+                (move_snippets_to, group_id),
+            )
+
+            conn.execute("DELETE FROM groups WHERE id = ?", (group_id,))
+
+        file_snippets = self._read_all_files()
+        for snippet in file_snippets:
+            if snippet.group_id == group_id:
+                snippet.group_id = move_snippets_to
+                self._write_file(snippet)
+
+        return True
+
+    def get_by_group(self, group_id: str | None) -> list[Snippet]:
+        with self._connect() as conn:
+            if group_id is None:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM snippets
+                    WHERE group_id IS NULL
+                    ORDER BY pinned DESC, updated_at DESC
+                    """
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM snippets
+                    WHERE group_id = ?
+                    ORDER BY pinned DESC, updated_at DESC
+                    """,
+                    (group_id,),
+                ).fetchall()
+        return [_row_to_snippet(row) for row in rows]
+
+    def search_by_group(self, query: str, group_id: str | None) -> list[Snippet]:
+        snippets = self.get_by_group(group_id)
+        return [s for s in snippets if s.matches(query)]
+
+    def count_group(self, group_id: str | None) -> int:
+        with self._connect() as conn:
+            if group_id is None:
+                row = conn.execute(
+                    "SELECT COUNT(*) as n FROM snippets WHERE group_id IS NULL"
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT COUNT(*) as n FROM snippets WHERE group_id = ?",
+                    (group_id,),
+                ).fetchone()
+        return row["n"]
