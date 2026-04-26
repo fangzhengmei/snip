@@ -93,6 +93,10 @@ class TestExportMarkdown:
         assert "# B" in result
         assert "---" in result
 
+    def test_empty_list_returns_empty_string(self):
+        result = export_markdown([])
+        assert result == ""
+
 
 class TestExportCsv:
     def test_exports_snippets_as_csv(self):
@@ -153,6 +157,10 @@ class TestExportYaml:
         assert "title: B" in result
         assert "---" in result
 
+    def test_empty_list_returns_empty_string(self):
+        result = export_yaml([])
+        assert result == ""
+
 
 class TestExportHtml:
     def test_exports_valid_html(self):
@@ -187,6 +195,14 @@ class TestExportHtml:
         result = export_html([snippet])
         assert "&lt;script&gt;" in result
         assert "<script>" not in result
+
+    def test_empty_list_returns_valid_html(self):
+        result = export_html([])
+        assert "<!DOCTYPE html>" in result
+        assert "<html>" in result
+        assert "<body>" in result
+        assert "</html>" in result
+        assert '<div class="snippet">' not in result
 
 
 class TestExportFunction:
@@ -237,6 +253,29 @@ class TestExportFunction:
         snippets = [Snippet(title="Test", content="c")]
         with pytest.raises(ValueError, match="Unsupported format"):
             export(snippets, "invalid")
+
+    def test_unsupported_format_error_includes_supported_formats(self):
+        snippets = [Snippet(title="Test", content="c")]
+        with pytest.raises(ValueError) as exc_info:
+            export(snippets, "invalid")
+        error_msg = str(exc_info.value)
+        assert "json" in error_msg
+        assert "markdown" in error_msg
+        assert "csv" in error_msg
+        assert "yaml" in error_msg
+        assert "html" in error_msg
+
+    def test_export_to_file_with_unsupported_format_raises_error(self, tmp_path):
+        snippets = [Snippet(title="Test", content="c")]
+        file_path = tmp_path / "output.txt"
+        with pytest.raises(ValueError, match="Unsupported format"):
+            export_to_file(snippets, file_path, fmt="invalid")
+
+    def test_case_insensitive_format(self):
+        snippets = [Snippet(title="Test", content="c")]
+        result = export(snippets, "JSON")
+        data = json.loads(result)
+        assert data[0]["title"] == "Test"
 
     def test_export_formats_constant(self):
         assert "json" in EXPORT_FORMATS
@@ -296,3 +335,127 @@ class TestExportToFile:
         path_str = str(tmp_path / "output.json")
         export_to_file(snippets, path_str)
         assert Path(path_str).exists()
+
+
+class TestSpecialCharacterEscaping:
+    def test_json_escapes_double_quotes(self):
+        snippet = Snippet(title='Test "quoted"', content='print("hello")')
+        result = export_json([snippet])
+        data = json.loads(result)
+        assert data[0]["title"] == 'Test "quoted"'
+        assert data[0]["content"] == 'print("hello")'
+
+    def test_json_escapes_backslashes(self):
+        snippet = Snippet(title="Test", content="C:\\Users\\test")
+        result = export_json([snippet])
+        data = json.loads(result)
+        assert data[0]["content"] == "C:\\Users\\test"
+
+    def test_json_escapes_newlines(self):
+        snippet = Snippet(title="Test", content="line1\nline2\nline3")
+        result = export_json([snippet])
+        data = json.loads(result)
+        assert data[0]["content"] == "line1\nline2\nline3"
+
+    def test_json_escapes_special_unicode(self):
+        snippet = Snippet(title="测试", content="emoji 🚀")
+        result = export_json([snippet])
+        data = json.loads(result)
+        assert data[0]["title"] == "测试"
+        assert data[0]["content"] == "emoji 🚀"
+
+    def test_csv_escapes_commas(self):
+        snippet = Snippet(title="Test, with, commas", content="a, b, c")
+        result = export_csv([snippet])
+        reader = csv.DictReader(io.StringIO(result))
+        rows = list(reader)
+        assert rows[0]["title"] == "Test, with, commas"
+        assert rows[0]["content"] == "a, b, c"
+
+    def test_csv_escapes_double_quotes(self):
+        snippet = Snippet(title='Test "quoted"', content='print("hi")')
+        result = export_csv([snippet])
+        reader = csv.DictReader(io.StringIO(result))
+        rows = list(reader)
+        assert rows[0]["title"] == 'Test "quoted"'
+        assert rows[0]["content"] == 'print("hi")'
+
+    def test_csv_escapes_newlines(self):
+        snippet = Snippet(title="Multiline\nTitle", content="line1\nline2")
+        result = export_csv([snippet])
+        reader = csv.DictReader(io.StringIO(result))
+        rows = list(reader)
+        assert rows[0]["title"] == "Multiline\nTitle"
+        assert rows[0]["content"] == "line1\nline2"
+
+    def test_html_escapes_ampersand(self):
+        snippet = Snippet(title="Test & more", content="if (a && b)")
+        result = export_html([snippet])
+        assert "Test &amp; more" in result
+        assert "a &amp;&amp; b" in result
+
+    def test_html_escapes_double_quotes(self):
+        snippet = Snippet(title='Test "quote"', content='print("hi")')
+        result = export_html([snippet])
+        assert "Test &quot;quote&quot;" in result
+        assert "print(&quot;hi&quot;)" in result
+
+    def test_html_escapes_single_quotes(self):
+        snippet = Snippet(title="Test 'quote'", content="print('hi')")
+        result = export_html([snippet])
+        assert "Test &#039;quote&#039;" in result
+        assert "print(&#039;hi&#039;)" in result
+
+    def test_html_escapes_greater_than(self):
+        snippet = Snippet(title="Test >", content="if (x > y)")
+        result = export_html([snippet])
+        assert "Test &gt;" in result
+        assert "x &gt; y" in result
+
+    def test_html_escapes_less_than(self):
+        snippet = Snippet(title="Test <", content="if (x < y)")
+        result = export_html([snippet])
+        assert "Test &lt;" in result
+        assert "x &lt; y" in result
+
+    def test_yaml_escapes_title_starting_with_dash(self):
+        snippet = Snippet(title="- starts with dash", content="code")
+        result = export_yaml([snippet])
+        assert '"- starts with dash"' in result
+
+    def test_yaml_escapes_title_starting_with_space(self):
+        snippet = Snippet(title="  leading spaces", content="code")
+        result = export_yaml([snippet])
+        assert '"  leading spaces"' in result
+
+    def test_yaml_escapes_title_with_double_quotes(self):
+        snippet = Snippet(title='Test "quoted"', content="code")
+        result = export_yaml([snippet])
+        assert '"Test \\"quoted\\""' in result
+
+    def test_yaml_escapes_title_with_newline(self):
+        snippet = Snippet(title="Multiline\nTitle", content="code")
+        result = export_yaml([snippet])
+        assert '"Multiline\\nTitle"' in result
+
+    def test_yaml_escapes_title_starting_with_special_chars(self):
+        special_chars = ["[", "{", "&", "*", "!", "|", ">", "'", '"', "%", "@", "`"]
+        for char in special_chars:
+            title = char + " test"
+            snippet = Snippet(title=title, content="code")
+            result = export_yaml([snippet])
+            if char == '"':
+                assert 'title: "\\" test"' in result
+            else:
+                assert f'title: "{char} test"' in result
+
+    def test_markdown_preserves_content_with_backticks(self):
+        snippet = Snippet(title="Test", content="code with `backticks`")
+        result = export_markdown([snippet])
+        assert "code with `backticks`" in result
+
+    def test_markdown_preserves_content_with_hashes(self):
+        snippet = Snippet(title="Test", content="# Not a header\n## Also not")
+        result = export_markdown([snippet])
+        assert "# Not a header" in result
+        assert "## Also not" in result

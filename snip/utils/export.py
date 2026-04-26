@@ -101,8 +101,17 @@ def export_yaml(snippets: Sequence[Snippet]) -> str:
 
 
 def _yaml_escape(value: str) -> str:
-    if "\n" in value or value.startswith((" ", "-", "[", "{", "&", "*", "!", "|", ">", "'", '"', "%", "@", "`")):
-        return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    needs_quoting = (
+        "\n" in value
+        or value.startswith((" ", "-", "[", "{", "&", "*", "!", "|", ">", "'", '"', "%", "@", "`"))
+        or '"' in value
+        or "\\" in value
+        or ":" in value
+        or "#" in value
+    )
+    if needs_quoting:
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        return f'"{escaped}"'
     return value
 
 
