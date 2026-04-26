@@ -279,6 +279,33 @@ class TestFileFormat:
 
 
 class TestImportFromJson:
+    def test_rejects_non_array_data(self, tmp_db):
+        data = {"title": "single snippet", "content": "content"}
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 0
+        assert len(skipped) == 1
+        assert "array" in skipped[0]
+        assert tmp_db.count() == 0
+
+    def test_rejects_string_data(self, tmp_db):
+        data = "not an array"
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 0
+        assert len(skipped) == 1
+        assert tmp_db.count() == 0
+
+    def test_rejects_integer_data(self, tmp_db):
+        imported, skipped = tmp_db.import_from_json(123)
+        assert imported == 0
+        assert len(skipped) == 1
+        assert tmp_db.count() == 0
+
+    def test_rejects_none_data(self, tmp_db):
+        imported, skipped = tmp_db.import_from_json(None)
+        assert imported == 0
+        assert len(skipped) == 1
+        assert tmp_db.count() == 0
+
     def test_imports_valid_snippets(self, tmp_db):
         data = [
             {"title": "Test 1", "content": "content 1", "language": "python"},

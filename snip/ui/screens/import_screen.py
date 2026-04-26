@@ -18,6 +18,31 @@ class ImportResult:
     error: str | None = None
 
 
+def parse_import_file(path_str: str) -> ImportResult:
+    """Parse a JSON import file and return the result.
+
+    This is a standalone function that can be tested without Textual.
+    """
+    path = Path(path_str).expanduser()
+    if not path.exists():
+        return ImportResult(success=False, error=f"file not found: {path_str}")
+
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except Exception as e:
+        return ImportResult(success=False, error=f"failed to read file: {e}")
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as e:
+        return ImportResult(success=False, error=f"invalid JSON: {e}")
+
+    if not isinstance(data, list):
+        return ImportResult(success=False, error="JSON must be an array of snippet objects")
+
+    return ImportResult(success=True, data=data)
+
+
 class ImportScreen(ModalScreen[ImportResult]):
     """Modal for importing snippets from a JSON file."""
 
@@ -66,25 +91,5 @@ class ImportScreen(ModalScreen[ImportResult]):
             self.query_one("#input-path", Input).focus()
             return
 
-        path = Path(path_str).expanduser()
-        if not path.exists():
-            self.dismiss(ImportResult(success=False, error=f"file not found: {path_str}"))
-            return
-
-        try:
-            raw = path.read_text(encoding="utf-8")
-        except Exception as e:
-            self.dismiss(ImportResult(success=False, error=f"failed to read file: {e}"))
-            return
-
-        try:
-            data = json.loads(raw)
-        except json.JSONDecodeError as e:
-            self.dismiss(ImportResult(success=False, error=f"invalid JSON: {e}"))
-            return
-
-        if not isinstance(data, list):
-            self.dismiss(ImportResult(success=False, error="JSON must be an array of snippet objects"))
-            return
-
-        self.dismiss(ImportResult(success=True, data=data))
+        result = parse_import_file(path_str)
+        self.dismiss(result)

@@ -275,6 +275,8 @@ class Database:
             return conn.execute("SELECT COUNT(*) as n FROM snippets").fetchone()["n"]
 
     def import_from_json(self, data: list[dict]) -> tuple[int, list[str]]:
+        if not isinstance(data, list):
+            return 0, ["JSON must be an array of snippet objects"]
         imported = 0
         skipped = []
         for i, item in enumerate(data):
