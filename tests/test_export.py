@@ -316,13 +316,31 @@ class TestExportToFile:
         content = file_path.read_text()
         assert "# Test" in content
 
-    def test_defaults_to_json_for_unknown_extension(self, tmp_path):
+    def test_explicit_format_allows_unknown_extension(self, tmp_path):
         snippets = [Snippet(title="Test", content="c")]
         file_path = tmp_path / "output.xyz"
-        export_to_file(snippets, file_path)
+        export_to_file(snippets, file_path, fmt="json")
         content = file_path.read_text()
         data = json.loads(content)
         assert data[0]["title"] == "Test"
+
+    def test_unknown_extension_raises_error(self, tmp_path):
+        snippets = [Snippet(title="Test", content="c")]
+        file_path = tmp_path / "output.xyz"
+        with pytest.raises(ValueError, match="Unknown file extension"):
+            export_to_file(snippets, file_path)
+
+    def test_no_extension_no_format_raises_error(self, tmp_path):
+        snippets = [Snippet(title="Test", content="c")]
+        file_path = tmp_path / "output"
+        with pytest.raises(ValueError, match="No file extension and no format specified"):
+            export_to_file(snippets, file_path)
+
+    def test_directory_not_exists_raises_error(self, tmp_path):
+        snippets = [Snippet(title="Test", content="c")]
+        file_path = tmp_path / "nonexistent" / "output.json"
+        with pytest.raises(FileNotFoundError, match="Directory does not exist"):
+            export_to_file(snippets, file_path)
 
     def test_accepts_path_object(self, tmp_path):
         snippets = [Snippet(title="Test", content="c")]

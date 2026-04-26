@@ -197,11 +197,39 @@ def export(snippets: Sequence[Snippet], fmt: str = "json") -> str:
 
 def export_to_file(snippets: Sequence[Snippet], file_path: str | Path, fmt: str | None = None) -> None:
     path = Path(file_path)
+
     if fmt is None:
         ext = path.suffix.lower().lstrip(".")
-        if ext in _FORMAT_EXPORT_FUNCS:
+        if ext and ext in _FORMAT_EXPORT_FUNCS:
             fmt = ext
+        elif ext:
+            raise ValueError(
+                f"Unknown file extension: '.{ext}'. "
+                f"Supported formats: {', '.join(EXPORT_FORMATS)}. "
+                f"Use --format to specify the format explicitly."
+            )
         else:
-            fmt = "json"
-    content = export(snippets, fmt)
-    path.write_text(content, encoding="utf-8")
+            raise ValueError(
+                "No file extension and no format specified. "
+                f"Use --format to specify one of: {', '.join(EXPORT_FORMATS)}"
+            )
+
+    parent = path.parent
+    if parent and not parent.exists():
+        raise FileNotFoundError(
+            f"Directory does not exist: {parent}. "
+            f"Please create the directory first or choose a different path."
+        )
+
+    try:
+        content = export(snippets, fmt)
+        path.write_text(content, encoding="utf-8")
+    except PermissionError:
+        raise PermissionError(
+            f"Permission denied: cannot write to '{path}'. "
+            f"Please check your file permissions."
+        )
+    except OSError as e:
+        raise OSError(
+            f"Failed to write file '{path}': {e}"
+        )

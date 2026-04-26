@@ -196,6 +196,43 @@ class TestExport:
         content = output_file.read_text()
         assert "# Test" in content
 
+    def test_export_to_file_unknown_extension_exits(self, tmp_path, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="code"))
+        output_file = tmp_path / "export.xyz"
+        with pytest.raises(SystemExit):
+            _run_export(tmp_db_path, output_path=str(output_file))
+
+    def test_export_to_file_no_extension_no_format_exits(self, tmp_path, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="code"))
+        output_file = tmp_path / "export"
+        with pytest.raises(SystemExit):
+            _run_export(tmp_db_path, output_path=str(output_file))
+
+    def test_export_to_file_directory_not_exists_exits(self, tmp_path, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="code"))
+        output_file = tmp_path / "nonexistent" / "export.json"
+        with pytest.raises(SystemExit):
+            _run_export(tmp_db_path, output_path=str(output_file))
+
+    def test_export_to_file_explicit_format_allows_unknown_extension(self, tmp_path, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="code"))
+        output_file = tmp_path / "export.xyz"
+        _run_export(tmp_db_path, output_path=str(output_file), fmt="json")
+        content = output_file.read_text()
+        data = json.loads(content)
+        assert len(data) == 1
+        assert data[0]["title"] == "Test"
+
+    def test_export_to_stdout_unknown_format_exits(self, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="code"))
+        with pytest.raises(SystemExit):
+            _run_export(tmp_db_path, fmt="invalid")
+
 
 class TestImport:
     def _write_json(self, path: Path, payload) -> Path:

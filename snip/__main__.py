@@ -131,11 +131,28 @@ def _run_export(snippets_dir: Path, output_path: str | None = None, fmt: str | N
     snippets = db.get_all()
 
     if output_path:
-        export_to_file(snippets, output_path, fmt)
-        _info(f"Exported {len(snippets)} snippet(s) to '{output_path}'.")
+        try:
+            export_to_file(snippets, output_path, fmt)
+            _info(f"Exported {len(snippets)} snippet(s) to '{output_path}'.")
+        except ValueError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
+        except FileNotFoundError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
+        except PermissionError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
+        except OSError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
-        content = export(snippets, fmt or "json")
-        print(content)
+        try:
+            content = export(snippets, fmt or "json")
+            print(content)
+        except ValueError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
 
 
 def _run_import(file_path: str, snippets_dir: Path) -> None:
