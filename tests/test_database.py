@@ -276,3 +276,104 @@ class TestFileFormat:
     def test_parse_file_invalid_raises(self):
         with pytest.raises((ValueError, KeyError)):
             _parse_file("no frontmatter here")
+
+
+class TestImportFromJson:
+    def test_imports_valid_snippets(self, tmp_db):
+        data = [
+            {"title": "Test 1", "content": "content 1", "language": "python"},
+            {"title": "Test 2", "content": "content 2", "tags": ["tag1", "tag2"]},
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 2
+        assert skipped == []
+        assert tmp_db.count() == 2
+        titles = {s.title for s in tmp_db.get_all()}
+        assert titles == {"Test 1", "Test 2"}
+
+    def test_skips_non_dict_entries(self, tmp_db):
+        data = [
+            "just a string",
+            {"title": "valid", "content": "ok"},
+            123,
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 1
+        assert len(skipped) == 2
+        assert tmp_db.count() == 1
+
+    def test_skips_entries_missing_required_fields(self, tmp_db):
+        data = [
+            {"title": "no content"},
+            {"content": "no title"},
+            {"title": "both", "content": "present"},
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 1
+        assert len(skipped) == 2
+        assert tmp_db.count() == 1
+        assert tmp_db.get_all()[0].title == "both"
+
+    def test_imports_with_all_fields(self, tmp_db):
+        data = [
+            {
+                "title": "Full snippet",
+                "content": "print('hello')",
+                "language": "python",
+                "description": "A test snippet",
+                "tags": ["test", "python"],
+                "pinned": True,
+            },
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 1
+        assert skipped == []
+        snippet = tmp_db.get_all()[0]
+        assert snippet.title == "Full snippet"
+        assert snippet.content == "print('hello')"
+        assert snippet.language == "python"
+        assert snippet.description == "A test snippet"
+        assert snippet.tags == ["test", "python"]
+        assert snippet.pinned is True
+
+    def test_tags_string_coerced_to_empty_list(self, tmp_db):
+        data = [
+            {"title": "t", "content": "c", "tags": "python"},
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 1
+        snippet = tmp_db.get_all()[0]
+        assert snippet.tags == []
+
+    def test_tags_list_of_strings_preserved(self, tmp_db):
+        data = [
+            {"title": "t", "content": "c", "tags": ["a", "b"]},
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 1
+        snippet = tmp_db.get_all()[0]
+        assert snippet.tags == ["a", "b"]
+
+    def test_empty_data_returns_zero(self, tmp_db):
+        imported, skipped = tmp_db.import_from_json([])
+        assert imported == 0
+        assert skipped == []
+        assert tmp_db.count() == 0
+
+    def test_default_language_is_text(self, tmp_db):
+        data = [
+            {"title": "t", "content": "c"},
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 1
+        snippet = tmp_db.get_all()[0]
+        assert snippet.language == "text"
+
+    def test_default_pinned_is_false(self, tmp_db):
+        data = [
+            {"title": "t", "content": "c"},
+        ]
+        imported, skipped = tmp_db.import_from_json(data)
+        assert imported == 1
+        snippet = tmp_db.get_all()[0]
+        assert snippet.pinned is False

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -7,6 +10,7 @@ from textual.screen import Screen
 from textual.widgets import Footer, Input, Label, ListView, Static
 
 from snip.models.snippet import Snippet
+from snip.ui.screens.import_screen import ImportResult, ImportScreen
 from snip.ui.widgets.app_header import AppHeader
 from snip.ui.widgets.snippet_list import SnippetItem, SnippetList
 from snip.ui.widgets.snippet_preview import SnippetPreview
@@ -28,6 +32,8 @@ class MainScreen(Screen):
         Binding("d", "delete_snippet", "Delete"),
         Binding("y", "yank_snippet", "Copy"),
         Binding("p", "pin_snippet", "Pin"),
+        Binding("i", "import_snippets", "Import"),
+        Binding("x", "export_snippets", "Export"),
         Binding("/", "focus_search", "Search"),
         Binding("escape", "clear_search", "Clear", show=False),
         Binding("q", "quit", "Quit"),
@@ -180,6 +186,48 @@ class MainScreen(Screen):
         self._refresh_list(self._query, select_id=snippet_id)
         state = "pinned" if pinned else "unpinned"
         self._flash(f"\u2018{snippet.title}\u2019 {state}")
+
+    def action_import_snippets(self) -> None:
+        def _on_result(result: ImportResult) -> None:
+            if not result.success:
+                if result.error:
+                    self._flash(f"import failed: {result.error}")
+                return
+
+            if result.data is None:
+                return
+
+            imported, skipped = self._db.import_from_json(result.data)
+            self._refresh_list(self._query)
+
+            if skipped:
+                self._flash(f"imported {imported} snippet(s), {len(skipped)} skipped")
+            else:
+                self._flash(f"imported {imported} snippet(s)")
+
+        self.app.push_screen(ImportScreen(), _on_result)
+
+    def action_export_snippets(self) -> None:
+        snippets = self._db.get_all()
+        data = [
+            {
+                "title": s.title,
+                "content": s.content,
+                "language": s.language,
+                "description": s.description,
+                "tags": s.tags,
+                "pinned": s.pinned,
+            }
+            for s in snippets
+        ]
+        json_str = json.dumps(data, indent=2)
+
+        from snip.utils.clipboard import copy_to_clipboard
+        if copy_to_clipboard(json_str):
+            count = len(data)
+            self._flash(f"exported {count} snippet(s) to clipboard")
+        else:
+            self._flash("clipboard unavailable")
 
     def action_quit(self) -> None:
         self.app.exit()

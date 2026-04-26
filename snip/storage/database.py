@@ -273,3 +273,27 @@ class Database:
     def count(self) -> int:
         with self._connect() as conn:
             return conn.execute("SELECT COUNT(*) as n FROM snippets").fetchone()["n"]
+
+    def import_from_json(self, data: list[dict]) -> tuple[int, list[str]]:
+        imported = 0
+        skipped = []
+        for i, item in enumerate(data):
+            if not isinstance(item, dict):
+                skipped.append(f"entry {i}: not an object")
+                continue
+            if "title" not in item or "content" not in item:
+                skipped.append(f"entry {i}: missing title or content")
+                continue
+            tags_raw = item.get("tags", [])
+            tags = [str(t) for t in tags_raw] if isinstance(tags_raw, list) else []
+            snippet = Snippet(
+                title=item["title"],
+                content=item["content"],
+                language=item.get("language", "text"),
+                description=item.get("description", ""),
+                tags=tags,
+                pinned=bool(item.get("pinned", False)),
+            )
+            self.create(snippet)
+            imported += 1
+        return imported, skipped
