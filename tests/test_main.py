@@ -7,6 +7,7 @@ import pytest
 
 from snip.__main__ import (
     _lang_from_ext,
+    _parse_format_arg,
     _resolve,
     _run_add,
     _run_export,
@@ -38,6 +39,36 @@ class TestLangFromExt:
 
     def test_case_insensitive(self, tmp_path):
         assert _lang_from_ext(tmp_path / "SCRIPT.PY") == "python"
+
+
+# ---------------------------------------------------------------------------
+# _parse_format_arg
+# ---------------------------------------------------------------------------
+
+class TestParseFormatArg:
+    def test_extracts_format_from_args(self):
+        args = ["--format", "markdown", "--export"]
+        fmt, remaining = _parse_format_arg(args)
+        assert fmt == "markdown"
+        assert remaining == ["--export"]
+
+    def test_returns_none_when_no_format(self):
+        args = ["--export", "file.json"]
+        fmt, remaining = _parse_format_arg(args)
+        assert fmt is None
+        assert remaining == ["--export", "file.json"]
+
+    def test_format_at_end_is_ignored(self):
+        args = ["--export", "--format"]
+        fmt, remaining = _parse_format_arg(args)
+        assert fmt is None
+        assert remaining == ["--export", "--format"]
+
+    def test_format_in_middle(self):
+        args = ["--db", "test", "--format", "csv", "--export"]
+        fmt, remaining = _parse_format_arg(args)
+        assert fmt == "csv"
+        assert remaining == ["--db", "test", "--export"]
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +153,48 @@ class TestExport:
         _run_export(tmp_db_path)
         data = json.loads(capsys.readouterr().out)
         assert data == []
+
+    def test_export_with_format_markdown(self, tmp_db_path, capsys):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="print('hi')", language="python"))
+        _run_export(tmp_db_path, fmt="markdown")
+        output = capsys.readouterr().out
+        assert "# Test" in output
+        assert "```python" in output
+        assert "print('hi')" in output
+
+    def test_export_with_format_csv(self, tmp_db_path, capsys):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="c"))
+        _run_export(tmp_db_path, fmt="csv")
+        output = capsys.readouterr().out
+        assert "title" in output
+
+    def test_export_to_file(self, tmp_path, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="content"))
+        output_file = tmp_path / "export.json"
+        _run_export(tmp_db_path, output_path=str(output_file))
+        content = output_file.read_text()
+        data = json.loads(content)
+        assert len(data) == 1
+        assert data[0]["title"] == "Test"
+
+    def test_export_to_file_with_format_markdown(self, tmp_path, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="code"))
+        output_file = tmp_path / "export.md"
+        _run_export(tmp_db_path, output_path=str(output_file), fmt="markdown")
+        content = output_file.read_text()
+        assert "# Test" in content
+
+    def test_export_to_file_infers_format_from_extension(self, tmp_path, tmp_db_path):
+        db = Database(tmp_db_path)
+        db.create(Snippet(title="Test", content="code"))
+        output_file = tmp_path / "export.md"
+        _run_export(tmp_db_path, output_path=str(output_file))
+        content = output_file.read_text()
+        assert "# Test" in content
 
 
 class TestImport:

@@ -123,22 +123,19 @@ def _run_add(file_path: str, snippets_dir: Path) -> None:
     _info(f"Saved '{snippet.title}' (id {snippet.id}, language: {language})")
 
 
-def _run_export(snippets_dir: Path) -> None:
+def _run_export(snippets_dir: Path, output_path: str | None = None, fmt: str | None = None) -> None:
     from snip.storage.database import Database
+    from snip.utils.export import export, export_to_file
 
     db = Database(snippets_dir)
-    data = [
-        {
-            "title": s.title,
-            "content": s.content,
-            "language": s.language,
-            "description": s.description,
-            "tags": s.tags,
-            "pinned": s.pinned,
-        }
-        for s in db.get_all()
-    ]
-    print(json.dumps(data, indent=2))
+    snippets = db.get_all()
+
+    if output_path:
+        export_to_file(snippets, output_path, fmt)
+        _info(f"Exported {len(snippets)} snippet(s) to '{output_path}'.")
+    else:
+        content = export(snippets, fmt or "json")
+        print(content)
 
 
 def _run_import(file_path: str, snippets_dir: Path) -> None:
@@ -353,6 +350,20 @@ def _run_init(shell: str) -> None:
         sys.exit(1)
 
 
+def _parse_format_arg(args: list[str]) -> tuple[str | None, list[str]]:
+    fmt = None
+    remaining: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--format" and i + 1 < len(args):
+            fmt = args[i + 1]
+            i += 2
+        else:
+            remaining.append(args[i])
+            i += 1
+    return fmt, remaining
+
+
 def main() -> None:
     global _quiet
     from snip.app import _DEFAULT_SNIPPETS_DIR
@@ -373,6 +384,10 @@ def main() -> None:
         _quiet = True
         args = [a for a in args if a not in ("-q", "--quiet")]
 
+    fmt: str | None = None
+    if "--format" in args:
+        fmt, args = _parse_format_arg(args)
+
     try:
         if not args:
             _run_tui(snippets_dir, theme_name)
@@ -390,7 +405,8 @@ OPTIONS
   --add <file>                  save a file as a snippet
   --delete <query>              delete a snippet
   --json <query>                output snippet as JSON
-  --export                      dump all snippets to JSON (stdout)
+  --export [file]               export all snippets (to file if specified)
+  --format <fmt>                specify export format (json, markdown, csv, yaml, html)
   --import <file|->>            import snippets from JSON
   --from-history                pick a shell history command and save it
   --theme <name>                launch TUI with a specific theme
@@ -398,6 +414,13 @@ OPTIONS
   -q, --quiet                   suppress informational output
   --version                     show version
   --help                        show this help
+
+EXPORT FORMATS
+  json (default)                JSON array of snippet objects
+  markdown / md                  Markdown with fenced code blocks
+  csv                           Comma-separated values
+  yaml / yml                    YAML document
+  html                          Standalone HTML page with styling
 
 THEMES
   snip theme list               list available themes
@@ -415,6 +438,9 @@ EXAMPLES
   snip --theme dracula          open TUI with the Dracula theme
   snip --list | fzf | xargs snip
   snip --export > backup.json
+  snip --export snippets.md
+  snip --export --format html > snippets.html
+  snip --export backup.csv --format csv
 """)
         elif args[0] in ("--version", "-v"):
             print(f"snip {VERSION}")
@@ -426,7 +452,8 @@ EXAMPLES
         elif args[0] == "--add" and len(args) >= 2:
             _run_add(args[1], snippets_dir)
         elif args[0] == "--export":
-            _run_export(snippets_dir)
+            output_path = args[1] if len(args) >= 2 else None
+            _run_export(snippets_dir, output_path, fmt)
         elif args[0] == "--import" and len(args) >= 2:
             _run_import(args[1], snippets_dir)
         elif args[0] == "--from-history":
