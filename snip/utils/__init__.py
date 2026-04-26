@@ -1,6 +1,7 @@
 from snip.utils.clipboard import copy_to_clipboard
 from snip.utils.export import (
     EXPORT_FORMATS,
+    IMPORT_FORMATS,
     export,
     export_csv,
     export_html,
@@ -8,6 +9,11 @@ from snip.utils.export import (
     export_markdown,
     export_to_file,
     export_yaml,
+    import_csv,
+    import_from_file,
+    import_from_string,
+    import_markdown,
+    import_yaml,
 )
 
 __all__ = [
@@ -20,4 +26,10 @@ __all__ = [
     "export_html",
     "export_to_file",
     "EXPORT_FORMATS",
+    "import_markdown",
+    "import_csv",
+    "import_yaml",
+    "import_from_string",
+    "import_from_file",
+    "IMPORT_FORMATS",
 ]

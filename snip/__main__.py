@@ -155,27 +155,35 @@ def _run_export(snippets_dir: Path, output_path: str | None = None, fmt: str | N
             sys.exit(1)
 
 
-def _run_import(file_path: str, snippets_dir: Path) -> None:
+def _run_import(file_path: str, snippets_dir: Path, fmt: str | None = None) -> None:
     from snip.models.snippet import Snippet
     from snip.storage.database import Database
+    from snip.utils.export import import_from_string, import_from_file, IMPORT_FORMATS
 
     if file_path == "-":
         raw = sys.stdin.read()
+        try:
+            data = import_from_string(raw, fmt or "json")
+        except ValueError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
     else:
         p = Path(file_path)
         if not p.exists():
             print(f"snip: file not found: {file_path}", file=sys.stderr)
             sys.exit(1)
-        raw = p.read_text()
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"snip: invalid JSON — {e}", file=sys.stderr)
-        sys.exit(1)
+        try:
+            data = import_from_file(file_path, fmt)
+        except ValueError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
+        except FileNotFoundError as e:
+            print(f"snip: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if not isinstance(data, list):
-        print("snip: JSON must be an array of snippet objects", file=sys.stderr)
+        print(f"snip: expected a list of snippet objects", file=sys.stderr)
         sys.exit(1)
 
     db = Database(snippets_dir)
@@ -423,8 +431,8 @@ OPTIONS
   --delete <query>              delete a snippet
   --json <query>                output snippet as JSON
   --export [file]               export all snippets (to file if specified)
-  --format <fmt>                specify export format (json, markdown, csv, yaml, html)
-  --import <file|->>            import snippets from JSON
+  --format <fmt>                specify export/import format
+  --import <file|->>            import snippets from file (auto-detects format)
   --from-history                pick a shell history command and save it
   --theme <name>                launch TUI with a specific theme
   --db <dir>                    use a custom snippets directory
@@ -432,12 +440,12 @@ OPTIONS
   --version                     show version
   --help                        show this help
 
-EXPORT FORMATS
+EXPORT/IMPORT FORMATS
   json (default)                JSON array of snippet objects
   markdown / md                  Markdown with fenced code blocks
   csv                           Comma-separated values
   yaml / yml                    YAML document
-  html                          Standalone HTML page with styling
+  html                          Standalone HTML page with styling (export only)
 
 THEMES
   snip theme list               list available themes
@@ -454,10 +462,18 @@ EXAMPLES
   snip --list docker            list snippets tagged #docker
   snip --theme dracula          open TUI with the Dracula theme
   snip --list | fzf | xargs snip
+
+  # Export examples
   snip --export > backup.json
   snip --export snippets.md
   snip --export --format html > snippets.html
   snip --export backup.csv --format csv
+
+  # Import examples
+  snip --import backup.json
+  snip --import snippets.md
+  snip --import --format yaml snippets.xyz
+  cat backup.json | snip --import -
 """)
         elif args[0] in ("--version", "-v"):
             print(f"snip {VERSION}")
@@ -472,7 +488,7 @@ EXAMPLES
             output_path = args[1] if len(args) >= 2 else None
             _run_export(snippets_dir, output_path, fmt)
         elif args[0] == "--import" and len(args) >= 2:
-            _run_import(args[1], snippets_dir)
+            _run_import(args[1], snippets_dir, fmt)
         elif args[0] == "--from-history":
             _run_from_history(snippets_dir)
         elif args[0] == "--delete" and len(args) >= 2:

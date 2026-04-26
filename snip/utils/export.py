@@ -233,3 +233,412 @@ def export_to_file(snippets: Sequence[Snippet], file_path: str | Path, fmt: str 
         raise OSError(
             f"Failed to write file '{path}': {e}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Import functions
+# ---------------------------------------------------------------------------
+
+IMPORT_FORMATS = ["json", "markdown", "csv", "yaml", "yml", "md"]
+
+
+def _parse_csv_value(value: str) -> Any:
+    if value is None:
+        return None
+    value = value.strip()
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    return value
+
+
+def import_csv(text: str) -> list[dict[str, Any]]:
+    reader = csv.DictReader(io.StringIO(text))
+    results: list[dict[str, Any]] = []
+    for row in reader:
+        item: dict[str, Any] = {}
+        for key, value in row.items():
+            item[key] = _parse_csv_value(value)
+        if "tags" in item and isinstance(item["tags"], str):
+            tags_str = item["tags"]
+            if tags_str:
+                item["tags"] = [t.strip() for t in tags_str.split(",") if t.strip()]
+            else:
+                item["tags"] = []
+        if "title" in item and "content" in item:
+            results.append(item)
+    return results
+
+
+def _yaml_parse_quoted(value: str) -> str:
+    if value.startswith('"') and value.endswith('"'):
+        inner = value[1:-1]
+        result = []
+        i = 0
+        while i < len(inner):
+            if inner[i] == "\\" and i + 1 < len(inner):
+                next_char = inner[i + 1]
+                if next_char == "n":
+                    result.append("\n")
+                elif next_char == "t":
+                    result.append("\t")
+                elif next_char == "r":
+                    result.append("\r")
+                else:
+                    result.append(next_char)
+                i += 2
+            else:
+                result.append(inner[i])
+                i += 1
+        return "".join(result)
+    return value
+
+
+def _yaml_parse_simple_value(value: str) -> Any:
+    value = value.strip()
+    if value.startswith('"'):
+        return _yaml_parse_quoted(value)
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
+    if value.lower() == "null" or value == "":
+        return None
+    return value
+
+
+def import_yaml(text: str) -> list[dict[str, Any]]:
+    docs = text.split("\n---\n")
+    results: list[dict[str, Any]] = []
+
+    for doc in docs:
+        lines = doc.strip().splitlines()
+        if not lines:
+            continue
+
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.lstrip()
+            indent_level = len(line) - len(stripped)
+
+            if stripped.startswith("- ") and indent_level == 0:
+                current_item: dict[str, Any] = {}
+                remaining = stripped[2:]
+
+                if ": " in remaining or remaining.endswith(":"):
+                    if remaining.endswith(":"):
+                        key = remaining[:-1].strip()
+                        next_i = i + 1
+                        is_list = False
+
+                        while next_i < len(lines):
+                            next_line = lines[next_i]
+                            next_stripped = next_line.lstrip()
+                            if next_stripped == "":
+                                next_i += 1
+                                continue
+                            if next_stripped.startswith("- "):
+                                is_list = True
+                            break
+
+                        if is_list:
+                            list_items: list[Any] = []
+                            j = next_i
+                            while j < len(lines):
+                                list_line = lines[j]
+                                list_stripped = list_line.lstrip()
+                                list_indent = len(list_line) - len(list_stripped)
+
+                                if list_stripped == "":
+                                    j += 1
+                                    continue
+
+                                if list_indent <= 0:
+                                    break
+
+                                if list_stripped.startswith("- "):
+                                    item_val = list_stripped[2:].strip()
+                                    if item_val == "|":
+                                        multi_lines: list[str] = []
+                                        k = j + 1
+                                        while k < len(lines):
+                                            ml_line = lines[k]
+                                            ml_stripped = ml_line.lstrip()
+                                            ml_indent = len(ml_line) - len(ml_stripped)
+                                            if ml_stripped == "" or ml_indent > 0:
+                                                multi_lines.append(ml_stripped)
+                                                k += 1
+                                            else:
+                                                break
+                                        while multi_lines and multi_lines[-1] == "":
+                                            multi_lines.pop()
+                                        list_items.append("\n".join(multi_lines))
+                                        j = k
+                                    else:
+                                        list_items.append(_yaml_parse_simple_value(item_val))
+                                        j += 1
+                                else:
+                                    j += 1
+                            current_item[key] = list_items
+                            i = j
+                        else:
+                            current_item[key] = None
+                            i += 1
+                    else:
+                        key, val = remaining.split(": ", 1)
+                        key = key.strip()
+                        val = val.strip()
+
+                        if val == "|":
+                            multi_lines = []
+                            j = i + 1
+                            while j < len(lines):
+                                ml_line = lines[j]
+                                ml_stripped = ml_line.lstrip()
+                                ml_indent = len(ml_line) - len(ml_stripped)
+
+                                if ml_indent > 0 or ml_stripped == "":
+                                    multi_lines.append(ml_stripped)
+                                    j += 1
+                                else:
+                                    break
+                            while multi_lines and multi_lines[-1] == "":
+                                multi_lines.pop()
+                            current_item[key] = "\n".join(multi_lines)
+                            i = j
+                        else:
+                            current_item[key] = _yaml_parse_simple_value(val)
+                            i += 1
+                else:
+                    i += 1
+
+                while i < len(lines):
+                    sub_line = lines[i]
+                    sub_stripped = sub_line.lstrip()
+                    sub_indent = len(sub_line) - len(sub_stripped)
+
+                    if sub_stripped == "":
+                        i += 1
+                        continue
+
+                    if sub_stripped.startswith("- ") and sub_indent == 0:
+                        if current_item and (current_item.get("title") or current_item.get("content")):
+                            results.append(current_item)
+                        break
+
+                    if ": " in sub_stripped or sub_stripped.endswith(":"):
+                        if sub_stripped.endswith(":"):
+                            key = sub_stripped[:-1].strip()
+                            next_i = i + 1
+                            is_list = False
+
+                            while next_i < len(lines):
+                                next_line = lines[next_i]
+                                next_stripped = next_line.lstrip()
+                                if next_stripped == "":
+                                    next_i += 1
+                                    continue
+                                if next_stripped.startswith("- "):
+                                    is_list = True
+                                break
+
+                            if is_list:
+                                list_items = []
+                                j = next_i
+                                while j < len(lines):
+                                    list_line = lines[j]
+                                    list_stripped = list_line.lstrip()
+                                    list_indent = len(list_line) - len(list_stripped)
+
+                                    if list_stripped == "":
+                                        j += 1
+                                        continue
+
+                                    if list_indent <= sub_indent:
+                                        break
+
+                                    if list_stripped.startswith("- "):
+                                        item_val = list_stripped[2:].strip()
+                                        if item_val == "|":
+                                            multi_lines = []
+                                            k = j + 1
+                                            while k < len(lines):
+                                                ml_line = lines[k]
+                                                ml_stripped = ml_line.lstrip()
+                                                ml_indent = len(ml_line) - len(ml_stripped)
+                                                if ml_stripped == "" or ml_indent > list_indent + 2:
+                                                    multi_lines.append(ml_stripped)
+                                                    k += 1
+                                                else:
+                                                    break
+                                            while multi_lines and multi_lines[-1] == "":
+                                                multi_lines.pop()
+                                            list_items.append("\n".join(multi_lines))
+                                            j = k
+                                        else:
+                                            list_items.append(_yaml_parse_simple_value(item_val))
+                                            j += 1
+                                    else:
+                                        j += 1
+                                current_item[key] = list_items
+                                i = j
+                                continue
+
+                            current_item[key] = None
+                            i += 1
+                        else:
+                            key, val = sub_stripped.split(": ", 1)
+                            key = key.strip()
+                            val = val.strip()
+
+                            if val == "|":
+                                multi_lines = []
+                                j = i + 1
+                                while j < len(lines):
+                                    ml_line = lines[j]
+                                    ml_stripped = ml_line.lstrip()
+                                    ml_indent = len(ml_line) - len(ml_stripped)
+
+                                    if ml_indent > sub_indent or ml_stripped == "":
+                                        multi_lines.append(ml_stripped)
+                                        j += 1
+                                    else:
+                                        break
+                                while multi_lines and multi_lines[-1] == "":
+                                    multi_lines.pop()
+                                current_item[key] = "\n".join(multi_lines)
+                                i = j
+                            else:
+                                current_item[key] = _yaml_parse_simple_value(val)
+                                i += 1
+                    else:
+                        i += 1
+
+                if current_item and (current_item.get("title") or current_item.get("content")):
+                    results.append(current_item)
+            else:
+                i += 1
+
+    return results
+
+
+def import_markdown(text: str) -> list[dict[str, Any]]:
+    lines = text.splitlines()
+    results: list[dict[str, Any]] = []
+
+    current_item: dict[str, Any] | None = None
+    in_code_block: bool = False
+    code_block_language: str = "text"
+    code_content: list[str] = []
+    description_lines: list[str] = []
+    tags_found: bool = False
+
+    for line in lines:
+        if line.startswith("# ") and not in_code_block:
+            if current_item is not None:
+                if description_lines:
+                    current_item["description"] = "\n".join(description_lines).strip()
+                if code_content:
+                    current_item["content"] = "\n".join(code_content)
+                    current_item["language"] = code_block_language or "text"
+                if current_item.get("title") and current_item.get("content"):
+                    results.append(current_item)
+
+            title = line[2:].strip()
+            current_item = {"title": title}
+            in_code_block = False
+            code_content = []
+            description_lines = []
+            tags_found = False
+
+        elif line.startswith("```") and current_item is not None:
+            if not in_code_block:
+                lang = line[3:].strip()
+                code_block_language = lang if lang else "text"
+                in_code_block = True
+                code_content = []
+            else:
+                in_code_block = False
+
+        elif in_code_block:
+            code_content.append(line)
+
+        elif current_item is not None and line.strip() == "**Tags:**" or line.strip().startswith("**Tags:** "):
+            tags_found = True
+            tags_part = line.strip()[len("**Tags:**"):].strip()
+            if tags_part:
+                tags = [t.strip() for t in tags_part.split(",") if t.strip()]
+                current_item["tags"] = tags
+            else:
+                current_item["tags"] = []
+
+        elif current_item is not None and line.strip() == "---":
+            pass
+
+        elif current_item is not None and not tags_found:
+            if line.strip() or description_lines:
+                description_lines.append(line)
+
+    if current_item is not None:
+        if description_lines:
+            current_item["description"] = "\n".join(description_lines).strip()
+        if code_content:
+            current_item["content"] = "\n".join(code_content)
+            current_item["language"] = code_block_language or "text"
+        if current_item.get("title") and current_item.get("content"):
+            results.append(current_item)
+
+    return results
+
+
+_FORMAT_IMPORT_FUNCS: dict[str, Callable[[str], list[dict[str, Any]]]] = {
+    "json": lambda t: json.loads(t) if t else [],
+    "markdown": import_markdown,
+    "md": import_markdown,
+    "csv": import_csv,
+    "yaml": import_yaml,
+    "yml": import_yaml,
+}
+
+
+def import_from_string(text: str, fmt: str) -> list[dict[str, Any]]:
+    normalized_fmt = fmt.lower()
+    if normalized_fmt not in _FORMAT_IMPORT_FUNCS:
+        raise ValueError(
+            f"Unsupported format: {fmt}. "
+            f"Supported formats: {', '.join(IMPORT_FORMATS)}"
+        )
+    try:
+        return _FORMAT_IMPORT_FUNCS[normalized_fmt](text)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON: {e}")
+    except Exception as e:
+        raise ValueError(f"Failed to parse {fmt} format: {e}")
+
+
+def import_from_file(file_path: str | Path, fmt: str | None = None) -> list[dict[str, Any]]:
+    path = Path(file_path)
+
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+
+    text = path.read_text(encoding="utf-8")
+
+    if fmt is None:
+        ext = path.suffix.lower().lstrip(".")
+        if ext and ext in _FORMAT_IMPORT_FUNCS:
+            fmt = ext
+        elif ext:
+            raise ValueError(
+                f"Unknown file extension: '.{ext}'. "
+                f"Supported formats: {', '.join(IMPORT_FORMATS)}"
+            )
+        else:
+            raise ValueError(
+                "No file extension and no format specified. "
+                f"Supported formats: {', '.join(IMPORT_FORMATS)}"
+            )
+
+    return import_from_string(text, fmt)
