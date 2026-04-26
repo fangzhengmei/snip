@@ -404,3 +404,62 @@ class TestImportFromJson:
         assert imported == 1
         snippet = tmp_db.get_all()[0]
         assert snippet.pinned is False
+
+
+class TestExportToJsonList:
+    def test_empty_db_returns_empty_list(self, tmp_db):
+        result = tmp_db.export_to_json_list()
+        assert result == []
+
+    def test_exports_single_snippet(self, tmp_db, sample_snippet):
+        tmp_db.create(sample_snippet)
+        result = tmp_db.export_to_json_list()
+        assert len(result) == 1
+        assert result[0]["title"] == sample_snippet.title
+        assert result[0]["content"] == sample_snippet.content
+        assert result[0]["language"] == sample_snippet.language
+        assert result[0]["description"] == sample_snippet.description
+        assert result[0]["tags"] == sample_snippet.tags
+        assert result[0]["pinned"] == sample_snippet.pinned
+
+    def test_exports_multiple_snippets(self, tmp_db):
+        from snip.models.snippet import Snippet
+        s1 = Snippet(title="A", content="a", language="python", tags=["tag1"], pinned=True)
+        s2 = Snippet(title="B", content="b", description="desc", tags=["tag2", "tag3"])
+        tmp_db.create(s1)
+        tmp_db.create(s2)
+        result = tmp_db.export_to_json_list()
+        assert len(result) == 2
+        titles = {r["title"] for r in result}
+        assert titles == {"A", "B"}
+
+    def test_exported_data_can_be_reimported(self, tmp_db, tmp_path):
+        from snip.models.snippet import Snippet
+        from snip.storage.database import Database
+
+        s = Snippet(
+            title="Test",
+            content="print('hello')",
+            language="python",
+            description="A test snippet",
+            tags=["test", "python"],
+            pinned=True,
+        )
+        tmp_db.create(s)
+
+        exported = tmp_db.export_to_json_list()
+
+        db2_dir = tmp_path / "db2" / "snippets"
+        db2 = Database(db2_dir)
+        imported, skipped = db2.import_from_json(exported)
+
+        assert imported == 1
+        assert skipped == []
+        assert db2.count() == 1
+        s2 = db2.get_all()[0]
+        assert s2.title == "Test"
+        assert s2.content == "print('hello')"
+        assert s2.language == "python"
+        assert s2.description == "A test snippet"
+        assert s2.tags == ["test", "python"]
+        assert s2.pinned is True

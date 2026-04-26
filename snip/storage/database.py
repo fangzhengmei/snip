@@ -299,3 +299,17 @@ class Database:
             self.create(snippet)
             imported += 1
         return imported, skipped
+
+    def export_to_json_list(self) -> list[dict]:
+        snippets = self.get_all()
+        return [
+            {
+                "title": s.title,
+                "content": s.content,
+                "language": s.language,
+                "description": s.description,
+                "tags": s.tags,
+                "pinned": s.pinned,
+            }
+            for s in snippets
+        ]

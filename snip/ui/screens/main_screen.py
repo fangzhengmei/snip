@@ -208,18 +208,7 @@ class MainScreen(Screen):
         self.app.push_screen(ImportScreen(), _on_result)
 
     def action_export_snippets(self) -> None:
-        snippets = self._db.get_all()
-        data = [
-            {
-                "title": s.title,
-                "content": s.content,
-                "language": s.language,
-                "description": s.description,
-                "tags": s.tags,
-                "pinned": s.pinned,
-            }
-            for s in snippets
-        ]
+        data = self._db.export_to_json_list()
         json_str = json.dumps(data, indent=2)
 
         from snip.utils.clipboard import copy_to_clipboard
